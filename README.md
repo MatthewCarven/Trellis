@@ -19,11 +19,23 @@ Pre-alpha. Public API is unstable until 0.1.
 from trellis import Workbook
 
 wb = Workbook()
-sheet = wb.add_sheet("Demo")
-sheet["A1"] = 42
-sheet["B1"] = "=A1*2"   # formula stored; engine evaluates it
-print(sheet["A1"].value, sheet["B1"].value)
+sh = wb.add_sheet("Demo")
+
+sh["A1"] = 10
+sh["A2"] = 20
+sh["A3"] = 30
+sh["B1"] = "=SUM(A1:A3)"
+sh["B2"] = '=IF(B1 > 50, "big", "small")'
+
+print(sh["B1"].value)   # 60
+print(sh["B2"].value)   # 'big'
+
+sh["A1"] = 100          # dependents recompute automatically
+print(sh["B1"].value)   # 150
+print(sh["B2"].value)   # 'big'
 ```
+
+22 built-in functions ship with the engine — aggregates (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`), scalar math (`ABS`, `ROUND`, `INT`), logical (`IF`, `IFERROR`, `ISERROR`, `AND`, `OR`, `NOT`), type checks (`ISBLANK`, `ISNUMBER`, `ISTEXT`), and text (`CONCAT`, `LEN`, `LEFT`, `RIGHT`, `MID`). Anything else is a plugin — see [docs/plugin-example.md](docs/plugin-example.md).
 
 ## Install
 
@@ -44,7 +56,7 @@ Three flavours of hook, depending on what you need.
 
 `Cell`, `Sheet`, and `Workbook` are all designed for subclassing. A `Cell` subclass works wherever a `Cell` does (`sheet["A1"] = MyCell(...)` preserves the subclass), and the `Workbook.add()` method accepts your own `Sheet` subclass.
 
-### 2. Subscribe to events (live now)
+### 2. Subscribe to events
 
 `Sheet` and `Workbook` are emitters. Handlers fire synchronously, in registration order, and exceptions propagate to the caller — no swallowing.
 
@@ -64,17 +76,36 @@ sh["A1"] = 100     # prints: Demo!A1: 42 -> 100
 
 Events emitted today:
 
-- `Sheet` — `"cell:change"` with `addr`, `old`, `new`.
+- `Sheet` — `"cell:change"` (user-initiated writes) and `"cell:recalc"` (recalc-engine writes to dependent formula cells). Both carry `addr`, `old`, `new`.
 - `Workbook` — `"sheet:add"`, `"sheet:remove"`, `"sheet:rename"`.
 - Subscribe with `"*"` to receive every event from a given emitter.
 
 The `Emitter` mixin (and `Subscription` handle) are re-exported from `trellis` if you want pub/sub on your own classes — it's a drop-in mixin and doesn't require `super().__init__()`.
 
-### 3. Register into a plugin registry (coming)
+### 3. Register a formula function
 
-For formula functions, file format handlers, renderers, and UI panels. A `pip install trellis-yourthing` package will register itself automatically via `entry_points`. Lands with the formula engine and file I/O.
+```python
+from trellis import Workbook, register_function, FormulaError, VALUE
 
-A worked plugin example will live under `docs/` once the registry surface is locked in.
+@register_function("DOUBLE")
+def _double(ctx, *args):
+    if len(args) != 1:
+        return FormulaError("#N/A", "DOUBLE takes 1 arg")
+    x = args[0]
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return VALUE
+    return x * 2
+
+wb = Workbook()
+sh = wb.add_sheet("D")
+sh["A1"] = 21
+sh["B1"] = "=DOUBLE(A1)"
+print(sh["B1"].value)   # 42
+```
+
+Functions can be **eager** (default, args pre-evaluated) or **lazy** (`@register_function("MYFN", lazy=True)` — args arrive as un-evaluated AST nodes, useful for control-flow built-ins like IF and IFERROR). Errors are values: return a `FormulaError` rather than raising. See [docs/plugin-example.md](docs/plugin-example.md) for the full story.
+
+A future `pip install trellis-yourthing` package will register itself automatically via `entry_points` — that's coming with file I/O in task #5.
 
 ## License
 

@@ -4,6 +4,32 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-05-27 — Session 15: Top-level re-exports + README + plugin docs (subtask #19, closes parent #4)
+
+**What got built**
+- `src/trellis/__init__.py` rewritten — re-exports the formula engine surface alongside the core types. Users can now write `from trellis import Workbook, register_function, FormulaError, parse_formula, RecalcEngine, ...` without touching `trellis.formula.*`. Module docstring updated with a working example (`SUM(A1:A2)` evaluating, then recomputing after an input change) that runs as a doctest via `pytest --doctest-modules`.
+- `README.md` — "Quick taste" section rewritten to actually exercise the engine end-to-end: set inputs, set formulas including `=IF(B1 > 50, "big", "small")`, print computed values, mutate an input, show dependents recompute. The 22-built-in list is named inline so the README's first 30 lines tell the user what's possible. "Extending §2" event-list updated to mention `cell:recalc`. "Extending §3" is no longer "(coming)" — it's the canonical `@register_function("DOUBLE")` example with a worked snippet, and links to the new docs file.
+- `docs/plugin-example.md` (NEW) — full plugin author's guide: contract (`fn(ctx, *args)`), errors-as-values, the error constants, range arg handling (flat list, row-major, None for blanks, FormulaError propagation), lazy mode (with `UNLESS` as a fresh example so it doesn't just rehash IF), and the override-built-ins-at-your-own-risk note. Points readers at `builtins.py` as the canonical reference set.
+- `tests/test_public_api.py` (NEW, 13 tests) — smoke test that imports EVERYTHING from `trellis` only (no `trellis.formula.X` imports). Locks in the re-exports: if someone deletes a name from `__init__.py`, the test fails loud. Covers the README "Quick taste" pattern, the §3 decorator pattern (registers `DOUBLE`, calls it from a formula), error-constants-are-FormulaError invariants, and identity checks (RecalcEngine, Emitter, Subscription all wired correctly).
+
+**Design calls worth remembering**
+- **Re-exports keep the `trellis.formula` subpackage as an implementation detail for casual users.** Power users and plugin authors still import from `trellis.formula.ast`, `trellis.formula.builtins`, etc., but the README and the doctest only show `from trellis import ...`. The package-level `__all__` is now sorted into Core + Formula sections (with `# Core` / `# Formula engine` comments) to make accidental removal during refactors more visible in code review.
+- **The docstring example doubles as the smoke test.** `pytest --doctest-modules src/trellis/__init__.py` runs the README's mental model end-to-end. If a refactor breaks `Workbook` + `SUM` + recalc, the doctest fails before any unit test runs.
+- **Plugin doc deliberately uses a fresh function (UNLESS) for the lazy example** instead of re-explaining IF. Two reasons: (a) IF is already documented inline in `builtins.py`, (b) the reader sees that lazy isn't only for "the obvious" control-flow cases — anything that wants to *decide* whether to evaluate an argument benefits.
+
+**Status**
+- **645 tests passing** (632 carried + 13 new). The package-docstring doctest also passes via `pytest --doctest-modules`. Green on the first run.
+- **Subtask #19 complete, which closes parent task #4 (the formula engine).** End-to-end: parser, AST, evaluator, function registry, 22 built-ins, recalc engine, Sheet/Workbook integration, top-level public surface, plugin author docs.
+- Working tree includes Sessions 12–15 worth of source and worklog entries on top of the bootstrap commit. Time for a checkpoint commit (Matthew has the commit message draft from end-of-Session-14; this session's additions are README/docs/re-exports/smoke-test glue and can roll into the same commit, OR split into a doc-focused follow-up — Matthew's call).
+
+**Next pick-up**
+- Task #5 — `entry_points`-based auto-discovery for plugins. The decorator surface is locked in; what's missing is "I `pip install trellis-mathpack` and `=COSH(A1)` just works." Small wiring layer: scan `entry_points` group `"trellis.formula_functions"` on package import, call each registered hook. ~20–30 LOC plus a fixture/test plugin.
+- Or shift gears entirely: file I/O (CSV in first, then `.xlsx` behind an optional dep). Both are smaller-than-#4 chunks; can pick either.
+
+---
+
+
+
 ## 2026-05-27 — Session 14: Recalc engine + Sheet/Workbook integration (subtask #18)
 
 **The milestone session.** Trellis is now a working spreadsheet — set a formula, it computes; change an input, dependents recompute; create a cycle, get `#CIRC!`. The integration test from `design.md` passes verbatim.
