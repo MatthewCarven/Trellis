@@ -10,6 +10,12 @@ events:
 These events describe the workbook's own collection only. To watch every cell
 in every sheet, subscribe to ``"sheet:add"`` here and attach a
 ``"cell:change"`` handler to each new sheet.
+
+Each Workbook auto-attaches a :class:`~trellis.formula.recalc.RecalcEngine`
+on construction, exposed as ``wb.recalc``. The engine subscribes to every
+sheet's ``cell:change`` (and ``sheet:add`` here) so formula cells recompute
+automatically. For batch operations where you want to skip per-cell recalc,
+call ``wb.recalc.detach()`` first.
 """
 
 from __future__ import annotations
@@ -38,6 +44,12 @@ class Workbook(Emitter):
     def __init__(self):
         self._sheets: dict[str, Sheet] = {}
         self.meta: dict[str, Any] = {}  # plugin scratch space; core never writes here
+        # Auto-attach the recalc engine. Lazy import avoids a circular
+        # dependency between trellis.core and trellis.formula at module
+        # load time. Public so users can detach() for batch ops.
+        from trellis.formula.recalc import RecalcEngine
+        self.recalc = RecalcEngine()
+        self.recalc.attach(self)
 
     def add_sheet(self, name: str = "Sheet1") -> Sheet:
         """Create and return a new sheet. Raises if ``name`` already exists.

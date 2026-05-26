@@ -13,6 +13,13 @@ Range support: ``sheet['A1:B5']`` returns a :class:`~trellis.core.range.Range`
 view. Assignment broadcasts (``sheet['A1:B5'] = 0`` fills, ``sheet['A1:A5'] =
 [1,2,3,4,5]`` spreads). ``del sheet['A1:B5']`` clears every cell in the range.
 
+There is also a private ``_set_value(addr, value)`` used by the recalc engine
+to write computed results without firing another ``cell:change`` (which would
+re-trigger recalc into an infinite loop). It mutates the existing cell's
+``value`` in place, preserving ``formula`` and ``meta``, then emits
+``"cell:recalc"`` — a separate event that recalc subscribers ignore and that
+UI handlers wanting "any value change" can listen to alongside ``cell:change``.
+
 Public surface:
     sheet.get(addr)         -> Cell       (empty Cell if absent)
     sheet.set(addr, value)  -> None       (also accepts a Cell or a "=formula")
@@ -25,6 +32,7 @@ Public surface:
     sheet.cells()           -> iterator of (A1, Cell) for stored cells
     len(sheet)              -> number of stored cells
     sheet.on("cell:change", handler) -> Subscription
+    sheet.on("cell:recalc", handler) -> Subscription   # post-recalc updates
 """
 
 from __future__ import annotations
@@ -130,6 +138,38 @@ class Sheet(Emitter):
         old = self._cells.pop(key, None)
         if old is not None:
             self.emit("cell:change", addr=to_a1(*key), old=old, new=Cell())
+
+    # --- non-emitting write path (recalc engine use) ---------------------
+
+    def _set_value(self, addr: Address, value: Any) -> None:
+        """Update ``value`` in place at ``addr``, preserving formula and meta.
+
+        Used by the recalc engine to write computed results. Emits
+        ``"cell:recalc"`` (NOT ``"cell:change"``) so the engine doesn't
+        re-trigger itself in an infinite loop. The cell's identity is
+        preserved — handlers that hold a reference to the cell will see the
+        new ``value`` directly.
+
+        No-op if no cell exists at ``addr``. The engine only writes back to
+        cells that were created via :meth:`set`, so this guard is defensive.
+
+        Event payload mirrors ``cell:change``: ``addr``, ``old`` (a snapshot
+        Cell carrying the pre-write value/formula/meta — separate instance,
+        safe to read), ``new`` (the live mutated Cell). Subscribers can attach
+        the same handler to both events if they want a unified "any change"
+        view.
+        """
+        key = _coerce(addr)
+        cell = self._cells.get(key)
+        if cell is None:
+            return
+        # Snapshot the previous state so handlers can compare old vs new
+        # values. The snapshot is a separate Cell instance — mutating ``cell``
+        # below won't change ``old``.
+        old = Cell(value=cell.value, formula=cell.formula)
+        old.meta = dict(cell.meta)
+        cell.value = value
+        self.emit("cell:recalc", addr=to_a1(*key), old=old, new=cell)
 
     # --- range access ----------------------------------------------------
 
