@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+
+# Type-check / lint caches
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.pytype/
+
+# Tooling-version pinning files (let each contributor pick)
+.python-version
+
+# Write-protocol staging artifacts. The protocol uses `cp <stage> <target>.tmp
+# && mv -f <target>.tmp <target>`, so .tmp files only persist if a copy is
+# interrupted mid-flight. Ignore them so an orphaned half-copy never gets
+# accidentally committed.
+*.tmp
+*.tmp.*
+
+# Editor / IDE / backup files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trellis"
+version = "0.0.1"
+description = "A minimalist, modular spreadsheet framework."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matthew Carven", email = "matthewcarven@gmail.com" }]
+keywords = ["spreadsheet", "tui", "framework", "modular", "extensible"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+]
+# Core library: zero required dependencies. You can use Trellis as a pure-Python
+# spreadsheet engine without installing anything else.
+dependencies = []
+
+[project.optional-dependencies]
+# The TUI ships separately so the engine can be embedded without dragging in
+# a terminal renderer.
+tui = ["textual>=0.50"]
+# xlsx is an optional file format. Trellis core never imports openpyxl.
+xlsx = ["openpyxl>=3.1"]
+# Convenience: install everything.
+all = ["textual>=0.50", "openpyxl>=3.1"]
+# Developer tooling.
+dev = ["pytest>=7", "pytest-cov", "ruff"]
+
+[project.urls]
+# Homepage = "https://github.com/matthewcarven/trellis"  # uncomment when published
+
+# Plugin discovery surface.
+# Third-party packages can register themselves under "trellis.plugins" and they
+# will be discovered automatically at framework startup. See docs/plugins.md
+# (forthcoming) for the registration contract.
+[project.entry-points."trellis.plugins"]
+# (built-in plugins, when they exist, will list themselves here)
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trellis"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
