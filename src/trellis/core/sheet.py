@@ -205,6 +205,22 @@ class Sheet(Emitter):
         except (TypeError, ValueError):
             return False
 
+    # --- file I/O --------------------------------------------------------
+
+    def to_csv(self, path, *, encoding: str = "utf-8", dialect: str = "excel") -> None:
+        """Write this sheet to a CSV file.
+
+        Convenience wrapper for :func:`trellis.io.csv.write_csv`. Each
+        cell's ``value`` is written (formulas emit their computed value,
+        matching Excel's CSV export). The sheet's bounding rectangle is
+        determined by the maximum populated row and column.
+
+        Lazy-imports :mod:`trellis.io.csv` so the core ``Sheet`` class
+        does not depend on the io subpackage at import time.
+        """
+        from ..io.csv import write_csv
+        write_csv(self, path, encoding=encoding, dialect=dialect)
+
     # --- iteration -------------------------------------------------------
 
     def cells(self) -> Iterator[tuple[str, Cell]]:

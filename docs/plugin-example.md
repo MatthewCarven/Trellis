@@ -6,7 +6,7 @@ Trellis's formula engine is built around a small public API:
 from trellis import register_function, FormulaError, VALUE
 ```
 
-`register_function` is a decorator. Decorate a Python callable and it becomes callable from any formula in any workbook, immediately. There is no separate "install" step today — that's coming with task #5 (`entry_points`-based auto-discovery, so `pip install trellis-mathpack` registers itself).
+`register_function` is a decorator. Decorate a Python callable and it becomes callable from any formula in any workbook, immediately. For a one-off function in your own script, that's all you need. To ship a function as an installable package — so users `pip install your_plugin` and the function is available — see [Shipping a plugin as an installable package](#shipping-a-plugin-as-an-installable-package) at the bottom.
 
 ## A first function
 
@@ -132,3 +132,81 @@ For sanity, prefer a distinct namespace prefix (`MYLIB_SUM`) unless you really d
 - `src/trellis/formula/builtins.py` — every built-in is small, public-by-default, and self-contained. Best reference for "how do real ones look."
 - `src/trellis/formula/functions.py` — the registry itself (`_REGISTRY`, the decorator, the lookup helpers).
 - `design.md` Part 2 — the formula engine's design rationale, including the lazy-arg story and the "errors as values" model.
+
+## Shipping a plugin as an installable package
+
+The decorator works fine in a single script, but for a package others can install, you want Trellis to auto-discover your plugin on import. Trellis scans the `trellis.plugins` entry point group when `import trellis` runs and invokes each registered callable.
+
+### 1. Write a setup function
+
+In your package, expose a no-argument callable that registers everything you want to add:
+
+```python
+# trellis_mathpack/__init__.py
+from trellis import register_function, VALUE
+import math
+
+def setup():
+    @register_function("COSH")
+    def _cosh(ctx, x):
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            return VALUE
+        return math.cosh(x)
+
+    @register_function("SINH")
+    def _sinh(ctx, x):
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            return VALUE
+        return math.sinh(x)
+```
+
+The setup function takes no arguments. It can do anything — register functions, subscribe to events, register custom Cell subclasses, monkey-patch internals. Trellis treats it as opaque code that runs once at startup.
+
+### 2. Declare the entry point
+
+In your package's `pyproject.toml`:
+
+```toml
+[project.entry-points."trellis.plugins"]
+mathpack = "trellis_mathpack:setup"
+```
+
+The left-hand name (`mathpack`) is the plugin identifier shown in error messages and returned by `load_plugins()`. The right-hand side is a `module:attribute` reference to your setup callable.
+
+### 3. That's it
+
+After `pip install trellis_mathpack`, opening a Python REPL and importing Trellis loads your plugin:
+
+```python
+>>> from trellis import Workbook
+>>> wb = Workbook(); sh = wb.add_sheet("S")
+>>> sh["A1"] = 1.0
+>>> sh["B1"] = "=COSH(A1)"
+>>> sh["B1"].value
+1.5430806348152437
+```
+
+### Failure handling
+
+If your setup function raises, Trellis reports the failure via `warnings.warn` (category `RuntimeWarning`) and continues loading other plugins. Your plugin's functions won't be registered, but the rest of Trellis (and other plugins) still work. Test your setup with `python -W error::RuntimeWarning -c "import trellis"` to make warnings fatal during development.
+
+### Disabling discovery
+
+For reproducible scripts or "is this Trellis or a plugin?" debugging, set the environment variable:
+
+```bash
+TRELLIS_DISABLE_PLUGIN_DISCOVERY=1 python my_script.py
+```
+
+This skips the entry_points scan entirely. Built-in functions still work; only third-party plugins are suppressed.
+
+### Manual discovery
+
+`trellis.load_plugins()` is public. Useful if you disabled auto-discovery and want to opt back in, or if you installed a plugin into a running process and want to pick it up without restarting:
+
+```python
+import trellis
+loaded = trellis.load_plugins()   # returns list of plugin names that loaded successfully
+```
+
+You can also pass a custom iterable of entry-point-like objects (anything with `.name` and `.load()`) — that's what the test suite does to keep tests hermetic.

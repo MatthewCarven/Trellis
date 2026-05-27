@@ -71,6 +71,10 @@ def test_all_promised_names_are_exported():
         "evaluate", "get_function", "parse_formula",
         "register_function", "registered_function_names",
         "unregister_function",
+        # Plugin discovery
+        "load_plugins",
+        # File I/O
+        "read_csv",
     }
     missing = expected - set(trellis.__all__)
     assert not missing, f"missing from __all__: {missing}"

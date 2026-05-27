@@ -4,6 +4,87 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-05-27 — Session 17: CSV read + write (task #4)
+
+**What got built**
+- `src/trellis/io/__init__.py` (NEW) — new subpackage, re-exports `read_csv` and `write_csv` from `trellis.io.csv`. Module docstring lays out the "core is stdlib-only; xlsx/parquet/etc. live behind optional-dependency extras" rule.
+- `src/trellis/io/csv.py` (NEW, ~220 LOC) — `read_csv(path, *, sheet_name="Sheet1", encoding="utf-8", dialect="excel", workbook=None) -> Workbook` and `write_csv(sheet, path, *, encoding="utf-8", dialect="excel") -> None`. Internal helpers `_infer_value` (string → int/float/string/None) and `_stringify` (Trellis value → CSV cell text). Inside the file, `import csv as _csv` is used defensively even though Python 3 absolute imports resolve to stdlib correctly — explicit-is-better.
+- `src/trellis/core/sheet.py` — added `Sheet.to_csv(self, path, *, encoding, dialect)` as a thin method that lazy-imports `write_csv` from `trellis.io.csv`. 16-line insertion before the existing iteration section. Lazy import keeps the core ↔ io coupling one-way.
+- `src/trellis/__init__.py` — re-exports `read_csv` at top level, adds it to `__all__`, mentions CSV round-trip in the docstring's "Extension surface" list.
+- `tests/test_io_csv.py` (NEW, 48 tests across 4 classes) — `TestInferValue` (19 unit tests on the type-inference rule), `TestReadCSV` (12 load-path tests), `TestWriteCSV` (10 save-path tests), `TestRoundTrip` (5 end-to-end tests). All hermetic via pytest `tmp_path`.
+- `tests/test_public_api.py` — added `"read_csv"` to the expected-exports set. Single-line addition.
+
+**Design calls worth remembering**
+- **`_infer_value` uses a round-trip shape check.** Parsed value is accepted only if `str(parsed) == s`. This means leading zeros (`"01234"` → string, not 1234), explicit `+` signs (`"+42"` → string), whitespace (`" 42 "` → string), scientific notation (`"1e5"` → string), and trailing zeros (`"3.140"` → string) all stay as strings. Preserves significant figures and ID-shaped data (ZIP codes, phone numbers) without an explicit "is this an ID column?" hint. The pandas comparison would be `dtype=object` for those columns; we get there by default. NaN and infinities are explicitly excluded — a CSV cell holding the literal text `"nan"` almost certainly didn't mean IEEE-754 NaN.
+- **Booleans are NOT inferred.** Excel's `TRUE`/`FALSE`/`True`/`true`/etc. is a minefield across data sources. Cells stay as strings; users cast explicitly if they want booleans.
+- **Leading `=` text loads as a string, NOT a formula.** Critical for "open a CSV someone else made and don't get surprised by accidental formula evaluation." Recovering a formula is one explicit line: `sh["B1"] = sh["B1"].value`. The `test_formula_text_stored_literally_not_evaluated` test locks this in.
+- **`read_csv` writes directly to `sheet._cells`, bypassing the public `Sheet.set` path.** Two reasons: (1) `Sheet.set` has the leading-`=` → formula sugar, which would defeat the literal-text policy. (2) Bulk-load shouldn't emit `cell:change` per cell — if a plugin is subscribed to that event, they probably don't want to be notified once per CSV row. Documented in the `_make_cell` docstring. If a use case ever needs per-cell events on load, we can add a `sheet.set(addr, value, literal=True)` kwarg later — but don't pre-build.
+- **`write_csv` writes the BOUNDING RECTANGLE.** Max row × max col of populated cells; trailing empty cells within the rectangle become empty fields. CSV is rectangular by definition. Trailing-empty rows past the last populated row are NOT emitted (no point). Empty sheet writes an empty file rather than raising — "no content" is a legit state, e.g., a newly-created sheet you want to clear an output file with.
+- **Formulas don't round-trip.** Save writes the computed value (`cell.value`); load reads the value back as a number/string. By design — CSV has no formula syntax. Documented in the `test_formulas_become_values_after_round_trip` test as intentional lossiness.
+- **`FormulaError` values render as their code in CSV** (`"#DIV/0!"`, `"#VALUE!"`, etc.). The user sees the error rather than a confusing `FormulaError(...)` repr in their exported CSV.
+- **API shape: top-level `trellis.read_csv` + `Sheet.to_csv` method.** Matthew picked "sheet.to_csv only" for the save API in the design-question pass. Asymmetric (read is top-level fn, write is method) but matches pandas mental model (`pd.read_csv` / `df.to_csv`). Adding `to_csv` to Sheet is small enough — one delegating method, lazy-imports the io module — that the core stays clean.
+- **Naming the file `csv.py` (not `csv_io.py`) is safe.** Inside `trellis/io/csv.py`, `import csv` does an absolute import to stdlib `csv`. Python 3 has no implicit relative imports. I used `import csv as _csv` defensively for readability; the `_` also signals "module-private import alias."
+- **Workbook is `wb["SheetName"]`, NOT `wb.sheets["..."]`.** Caught me writing the tests — `wb.sheets` is an iterator method, dict-style access goes through `__getitem__`. Fixed via sed across the test file. Worth remembering for any future code that introspects the workbook.
+
+**Status**
+- **711 tests passing** (663 prior + 48 new). Doctest still passes. Green on the (third) pytest run — first run had 16 fails from the `wb.sheets["X"]` API confusion above; sed cleanup got it to green in two passes.
+- Task #4 complete. CSV file I/O end-to-end: load, save, round-trip, with bounded-rectangle semantics, type inference, formula-as-literal-text policy, and FormulaError → error-code rendering.
+- Working tree has Sessions 16–17 worth of changes uncommitted on top of `f30ab34`. Suggested split for commit:
+  - Commit A (Session 16): "Plugin auto-discovery via entry_points (#5): load_plugins, env kill switch, docs."
+  - Commit B (Session 17): "CSV file I/O: read_csv, Sheet.to_csv, type inference, round-trip tests."
+  Or fold both into a single commit if you prefer one chunk.
+
+**Tool notes**
+- All file writes used stage-in-`/tmp` + cp + sync + sha256 protocol. Unique filenames (`tio_csv_s17.py`, `wl_s17_entry.md`, etc.) to dodge the `/tmp` cross-session collision pattern that bit Session 14 and got us briefly in Session 16. One small Edit via the file tool (`test_public_api.py`, adding `"read_csv"` to the expected set) — single-line addition, within the Edit carve-out, verified.
+- 3.11 venv at `/tmp/trellis_venv` from Session 16 is still usable; ran tests via `PYTHONPATH=src` to avoid the mount's editable-install permission issue.
+
+**Next pick-up**
+- Roadmap is open. Candidates:
+  - **Commit + pause.** Clean stopping point — formula engine + plugin discovery + CSV all shipped. Trellis is a working, extensible, importable spreadsheet at this point.
+  - **TUI work.** The biggest remaining "is this actually a spreadsheet you can use?" chunk. Textual is the chosen lib (in optional-deps as `tui`).
+  - **More built-ins.** Dates (DATE, TODAY, NOW, YEAR, MONTH, DAY), VLOOKUP/HLOOKUP/INDEX-MATCH, statistical (STDEV, VAR, MEDIAN). Each is its own chunk.
+  - **A plugin example package.** Build `trellis-mathpack` (or similar) as a separate installable package that exercises the entry_points discovery end-to-end. Validates the plugin story for real, not just in tests.
+- Matthew's call.
+
+---
+
+
+
+## 2026-05-27 — Session 16: entry_points plugin auto-discovery (task #5, closes README/docs follow-up)
+
+**What got built**
+- `src/trellis/_plugins.py` (NEW, ~90 LOC) — `load_plugins(entry_points=None)` plus module constants `ENV_DISABLE = "TRELLIS_DISABLE_PLUGIN_DISCOVERY"` and `ENTRY_POINT_GROUP = "trellis.plugins"`. Scans `importlib.metadata.entry_points(group=...)` by default; tests pass duck-typed `FakeEntryPoint` objects to keep things hermetic. Each entry point's `.load()()` is called inside a `try/except Exception` — failures emit `warnings.warn(..., RuntimeWarning, stacklevel=2)` with the plugin name and `type(e).__name__: {e}`, and discovery continues with the next plugin.
+- `src/trellis/__init__.py` — added `from ._plugins import load_plugins`, added `"load_plugins"` to `__all__`, called `load_plugins()` at the very BOTTOM of the module (after every public name is bound, so plugin `setup()` calls can `from trellis import register_function` without hitting partial-import errors). Module docstring's "Extension surface" list updated to include the new entry_points story. Stale "Plugin registry … arrives in task #5" line removed.
+- `tests/test_plugin_discovery.py` (NEW, 17 tests, 284 LOC) — `FakeEntryPoint` dataclass for hermetic stubs, `isolate_registry` autouse fixture (snapshot/restore `_REGISTRY`), `clear_disable_env` autouse fixture. Coverage: re-export check, group constant matches pyproject, happy path (multiple plugins, empty input, default scan doesn't crash), function registration end-to-end (plugin registers `PLUGIN_DOUBLE`, formula `=PLUGIN_DOUBLE(A1)` evaluates), broken plugin warnings (name in message, exception type+message in message, others still load, multiple bad plugins each get their own warning, `ep.load()` raising is also caught), env-var kill switch (`"1"` disables, any non-empty disables, empty does not disable, disables real scan too), and one `mock.patch("importlib.metadata.entry_points")` check that the default code path is hit with the right group arg.
+- `tests/test_public_api.py` — added `"load_plugins"` to the expected-exports set (one-line addition; verified with `git diff` per the folder's Edit-banned rule).
+- `docs/plugin-example.md` — rewrote the "no install step today" hedge on line 9 to point readers at the new "Shipping a plugin as an installable package" section appended at the bottom. New section covers: the `setup()` no-arg callable contract, `pyproject.toml` `[project.entry-points."trellis.plugins"]` stanza, the cosh/sinh worked example, failure handling (warn-and-skip + `python -W error::RuntimeWarning` for dev), kill switch (`TRELLIS_DISABLE_PLUGIN_DISCOVERY`), and `trellis.load_plugins()` for manual / mid-process loading.
+- `README.md` — replaced the misleading "coming with file I/O in task #5" sentence (past-me crossed wires — #5 is plugin discovery, not file I/O) with a new "Extending §4: Ship a plugin as an installable package" subsection covering the same ground in 6 lines.
+
+**Design calls worth remembering**
+- **The entry_points group is `trellis.plugins`, NOT `trellis.formula_functions`.** Earlier session notes had me casually writing the narrower name, but the bootstrap `pyproject.toml` chose the broader one. The broader name is the right call given the "open extensibility / chaotic good" philosophy: a plugin's setup function is opaque code and can do anything (register functions, subscribe to events, attach custom Sheet subclasses, monkey-patch the world). Locking it to "formula functions only" would be a self-inflicted wound.
+- **`load_plugins()` is called at the BOTTOM of `trellis/__init__.py`, not inside `trellis/formula/__init__.py`.** This matters: plugin `setup()` callables typically `from trellis import register_function`, which only works once `trellis/__init__.py` has bound that name into its namespace. Triggering discovery inside the formula subpackage's init would fire before `trellis.register_function` is exposed at the top level. Moved it up; documented why in the comment.
+- **`load_plugins(entry_points=None)` takes an optional iterable for testing.** The default code path goes through `importlib.metadata.entry_points(group=...)`, but the function is also the public API for "I want to load this specific set of plugins manually" — tests use it with `FakeEntryPoint` instances, and advanced users can use it to load plugins from a non-default source (e.g., a config file, a directory scan, a remote registry). Same surface, two use cases.
+- **Exception trap is `except Exception:`, not `except BaseException:`.** Deliberately lets `KeyboardInterrupt` and `SystemExit` propagate — if a plugin is doing something weird that warrants those, we want it to bubble up, not be swallowed by the plugin loader.
+- **`stacklevel=2` on `warnings.warn`** so the warning's filename/line points at the caller of `load_plugins`, not at `_plugins.py:71`. Small thing, but the difference between "user sees their `import trellis` line as the source" and "user sees Trellis internals" is night and day for debugging.
+- **No retry logic, no plugin ordering, no dependency declarations.** Per the "don't pre-build sophisticated solvers" memory: discovery is a flat list, loaded in iteration order, no DAG. If someone needs plugin A loaded before plugin B, they sort it out in their entry point's `setup()`. We can revisit if a real use case demands it.
+
+**Tool notes**
+- All file writes used the stage-in-`/tmp` + `cp` + `sync` + `sha256sum` protocol from `write-protocol-mount-folders`. One small one-line addition to `tests/test_public_api.py` went via Edit (single-line addition is within the "verify with git diff" carve-out from Session 14's rule); verified the file was 202 lines after the edit and the new line was at the right place.
+- Sandbox-side `git status` is still throwing the `null sha1 / index.lock` permission warning that's been background noise — Matthew's local `git status` is the source of truth, as confirmed at the start of the session.
+- Test execution required spinning up a 3.11 venv outside the mount (`/tmp/trellis_venv`) because pyproject's `requires-python >=3.11` rejected the system 3.10, and the mount blocked uv from writing editable install metadata. Ran with `PYTHONPATH=src` instead of editable install. **Also tripped over a stale `/tmp/ast.py`** from a prior session that shadowed the stdlib — same `/tmp` collision pattern that bit Session 14, just a different file. Worked around by `cd /tmp/run` (subdir not on path). Worth keeping in mind: `/tmp` is shared across sessions and accumulates cruft.
+
+**Status**
+- **663 tests passing** (645 prior + 17 new + 1 doctest re-run from the package docstring). Green on the first pytest run.
+- Tasks #1 and #2 in this session's TaskList complete. The plugin discovery story is end-to-end: code, tests, README, docs.
+- Working tree has Session 16 worth of changes uncommitted on top of `f30ab34`. Suggested commit: "Plugin auto-discovery via entry_points (#5): load_plugins, env kill switch, docs."
+
+**Next pick-up**
+- Task #3 — the file I/O scope conversation. Matthew flagged at the start of the session that he wants to talk through complexity (xlsx vs CSV, openpyxl as opt-in, what "round-trip" should mean for formulas) before any code is written. Hold for that discussion.
+
+---
+
+
+
 ## 2026-05-27 — Session 15: Top-level re-exports + README + plugin docs (subtask #19, closes parent #4)
 
 **What got built**

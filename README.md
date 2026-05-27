@@ -105,7 +105,16 @@ print(sh["B1"].value)   # 42
 
 Functions can be **eager** (default, args pre-evaluated) or **lazy** (`@register_function("MYFN", lazy=True)` — args arrive as un-evaluated AST nodes, useful for control-flow built-ins like IF and IFERROR). Errors are values: return a `FormulaError` rather than raising. See [docs/plugin-example.md](docs/plugin-example.md) for the full story.
 
-A future `pip install trellis-yourthing` package will register itself automatically via `entry_points` — that's coming with file I/O in task #5.
+### 4. Ship a plugin as an installable package
+
+For a plugin that ships as a package others can install, declare an entry point in your `pyproject.toml`:
+
+```toml
+[project.entry-points."trellis.plugins"]
+mathpack = "trellis_mathpack:setup"
+```
+
+`trellis_mathpack.setup` is a no-argument callable that does the `@register_function` decorations (and anything else you want — subscribe to events, register Cell subclasses, etc.). Trellis auto-discovers it on `import trellis`. A broken plugin warns and is skipped; others still load. Set `TRELLIS_DISABLE_PLUGIN_DISCOVERY=1` to opt out. Full story in [docs/plugin-example.md](docs/plugin-example.md).
 
 ## License
 

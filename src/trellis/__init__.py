@@ -31,10 +31,15 @@ Extension surface available today:
     - Register a formula function with ``@register_function("MYFN")``. It
       becomes callable as ``=MYFN(...)`` in any formula immediately. See
       ``docs/plugin-example.md``.
+    - Ship your plugin as an installable package: declare an entry point
+      under the ``trellis.plugins`` group and your setup callable runs
+      automatically when ``trellis`` is imported. See ``docs/plugin-example.md``.
     - Attach a RecalcEngine manually if you want fine-grained control (one is
       auto-attached to every Workbook on construction).
-
-Plugin registry (entry_points-based auto-discovery) arrives in task #5.
+    - Round-trip CSV files via ``trellis.read_csv(path)`` and
+      ``sheet.to_csv(path)``. Stdlib-only, zero dependencies. Formulas
+      are saved as their computed values (matching Excel's CSV export);
+      values are inferred on load (int, then float, then string).
 """
 
 # Core data model
@@ -68,6 +73,14 @@ from .formula import (
     unregister_function,
 )
 
+# Plugin discovery — entry_points-based auto-discovery. See ``_plugins`` for
+# the contract and ``docs/plugin-example.md`` for the author-facing docs.
+from ._plugins import load_plugins
+
+# File I/O — CSV ships in core (stdlib only). Other formats live behind
+# optional-dependency extras (see ``trellis.io`` for the structure).
+from .io.csv import read_csv
+
 __all__ = [
     # Core
     "Cell",
@@ -96,5 +109,16 @@ __all__ = [
     "register_function",
     "registered_function_names",
     "unregister_function",
+    # Plugin discovery
+    "load_plugins",
+    # File I/O
+    "read_csv",
 ]
 __version__ = "0.0.1"
+
+# Eagerly load any plugins registered under the ``trellis.plugins`` entry
+# point group. Done LAST so every public name above is already bound when
+# a plugin's setup callable runs (plugins typically do
+# ``from trellis import register_function`` and similar). Honours the
+# ``TRELLIS_DISABLE_PLUGIN_DISCOVERY`` environment variable.
+load_plugins()
