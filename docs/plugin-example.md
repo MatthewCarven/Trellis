@@ -127,6 +127,35 @@ def _strict_sum(ctx, *args):
 
 For sanity, prefer a distinct namespace prefix (`MYLIB_SUM`) unless you really do want to override.
 
+## Namespacing your cell / sheet / workbook metadata
+
+`Cell`, `Sheet`, and `Workbook` each carry a public `meta = {}` dict. It is
+yours — core never writes to it. But it's *shared*: every plugin sees the
+same dict, so two plugins that both reach for `meta["color"]` will clobber
+each other.
+
+The convention: **namespace your keys under a single key named for your
+plugin**, and keep your state in a dict under it.
+
+```python
+# Good — each plugin owns one top-level key:
+cell.meta["styles"] = {"bold": True, "color": "red"}
+cell.meta["validation"] = {"rule": "int_range", "min": 0, "max": 100}
+
+# Bad — flat keys collide across plugins:
+cell.meta["bold"] = True
+cell.meta["color"] = "red"
+cell.meta["validation_rule"] = "int_range"
+```
+
+This is a **convention, not an enforced rule**. Trellis deliberately doesn't
+wrap `meta` in a guarded proxy — that's the kind of "for safety"
+encapsulation the project avoids (see `design.md`, the open-extensibility
+philosophy). A plugin that ignores the convention works fine right up until
+it collides with another plugin; the collision is the consequence, and
+that's enough. Pick a key unlikely to clash — your distribution name is a
+good default (`cell.meta["trellis_mathpack"]`).
+
 ## Where to go next
 
 - `src/trellis/formula/builtins.py` — every built-in is small, public-by-default, and self-contained. Best reference for "how do real ones look."

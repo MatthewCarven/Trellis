@@ -11,7 +11,7 @@ A minimalist, modular spreadsheet framework in Python. The folder is named "Cros
 ## Conventions
 - Source under `src/trellis/`. Tests under `tests/`.
 - Public surface re-exported from `trellis/__init__.py`. If it's not re-exported, it's internal.
-- Cell, Sheet, Workbook all carry a `meta = {}` dict — plugins put their state there. Core never writes to `meta`.
+- Cell, Sheet, Workbook all carry a `meta = {}` dict — plugins put their state there. Core never writes to `meta`. Plugins should namespace their keys under a single plugin-named key (e.g. `cell.meta["styles"][...]`), by convention not enforcement — see `docs/plugin-example.md`.
 - Indexing uses A1 notation as the public-facing string form. Internally, everything is zero-indexed `(row, col)` tuples. Convert at the boundary using `trellis.core.address`.
 - Python 3.11+ baseline.
 

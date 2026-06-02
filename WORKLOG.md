@@ -4,6 +4,29 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-03 — Session 22: Part 3.4 — meta-namespacing convention (task #7) — Part 3 COMPLETE
+
+**What got built** (pure docs, no code)
+- `docs/plugin-example.md` — new section "Namespacing your cell / sheet / workbook metadata" with the good/bad pair (own one top-level key per plugin, keep state in a dict under it vs flat keys that collide). Frames it as convention-not-enforcement and points at the open-extensibility philosophy; suggests the distribution name as the default key.
+- `CLAUDE.md` — one-line cross-ref under Conventions: plugins namespace `meta` keys under a single plugin-named key, see `docs/plugin-example.md`.
+- `design.md` — table row #7 DONE. **All of Part 3 (#1–#7) now complete** bar #8 (this verification/WORKLOG step).
+
+**Status**
+- No code change this session; suite remains at **748 passing**.
+- **Part 3 "pre-render engine prep" is done.** Recap of what shipped across Sessions 19–22:
+  - 3.1 — locked `cell:change`/`cell:recalc` payload (sheet, tuple address, old/new value+formula, live old/new Cell, recalc `trigger`).
+  - 3.2 — `Sheet.batch()` (buffer writes, one `sheet:batch`, deferred recalc via Replay; `read_csv` refactored onto it).
+  - 3.3 — public `Sheet.used_range()`; `write_csv` refactored onto it.
+  - 3.4 — meta-namespacing convention documented.
+- The public surface the TUI / external plugins depend on is now hardened ahead of going public. Deferred: `MAX_RECALC_DEPTH` guard (design.md Open Questions), the recalc dedupe-once optimisation (only if a perf need appears).
+
+**Next pick-up**
+- The big one: **plugin example package (`trellis-mathpack`)** — a separate installable that exercises the `entry_points` discovery end-to-end. This is the publication gate (per the `trellis-publication-gated-on-client` memory: no GitHub push until a real consumer has exercised the API). Once it's green, Trellis can go public.
+- Alternatively, the TUI (`trellis-tui` sister package) — the largest remaining "is this a usable spreadsheet?" chunk, and the prime consumer of the Part 3 surface.
+- Matthew's call on order.
+
+---
+
 ## 2026-06-03 — Session 21: Part 3.3 — promote used_range() to public (task #6)
 
 **What got built**

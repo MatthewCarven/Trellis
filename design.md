@@ -476,7 +476,7 @@ cell.meta["validation_rule"] = "int_range"
 | #4 | Spec `Sheet.batch()` API surface | DONE 2026-06-03 |
 | #5 | Implement `Sheet.batch()` + tests + read_csv refactor | DONE 2026-06-03 |
 | #6 | Promote `used_range` to public + write_csv refactor | DONE 2026-06-03 |
-| #7 | Document meta-namespacing convention | (pure docs) |
+| #7 | Document meta-namespacing convention | DONE 2026-06-03 |
 | #8 | Verification + WORKLOG entry | Verify |
 
 Per the established pattern: each implementation task lands as a self-contained chunk with tests bundled. The audit step (#2) and the spec step (#4) are explicit because they're the planning artifacts that have made every implementation task since #16 land first-run green.
