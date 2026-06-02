@@ -85,6 +85,7 @@ Events emitted today:
 - `Sheet` — `"sheet:batch"` (fired once when a `with sheet.batch():` block exits cleanly) carrying `sheet` and `changes` (a list of per-cell change dicts, each shaped like a `cell:change` payload minus `sheet`). Per-cell `cell:change` is suppressed inside a batch.
 - `Workbook` — `"sheet:add"`, `"sheet:remove"`, `"sheet:rename"`.
 - Subscribe with `"*"` to receive every event from a given emitter.
+- `Sheet.used_range()` returns `((min_row, min_col), (max_row, max_col))` (zero-indexed, inclusive) over non-empty cells, or `None` for an empty sheet — what a renderer or exporter calls to find the extent it must walk.
 
 The `Emitter` mixin (and `Subscription` handle) are re-exported from `trellis` if you want pub/sub on your own classes — it's a drop-in mixin and doesn't require `super().__init__()`.
 

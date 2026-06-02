@@ -463,7 +463,7 @@ cell.meta["validation_rule"] = "int_range"
 - **Should `cell:change` include the `Cell` object itself, or just the address + values?** **DECIDED 2026-06-03 (against the original lean): include the live `Cell`** as `old`/`new` *alongside* the scalar `old_value`/`new_value`/`old_formula`/`new_formula` fields. Matthew's call — sharp-tools/give-everything over guard-rails; also keeps existing `old`/`new` subscribers (incl. the recalc engine) working. The mutation foot-gun is accepted as the plugin author's responsibility.
 - **What's the canonical address representation in event payloads — tuple `(row, col)` or A1 string `"A1"`?** **DECIDED 2026-06-03: tuple `(row, col)`** under the key `address` (replaces the old `addr` A1-string key). `to_a1(*address)` at the human-facing edge. Matched the original lean.
 - **Does `sheet.batch()` need a `discard()` method** to abort the batch from inside the block without raising? Lean no — if discard-from-inside becomes a real need, add it then.
-- **Should `Sheet.used_range` count cells with explicit `None` values, or only "truly empty" ones?** Depends on whether the engine distinguishes "never set" from "set to None" — confirm in the audit and document the behaviour either way.
+- **Should `Sheet.used_range` count cells with explicit `None` values, or only "truly empty" ones?** **DECIDED 2026-06-03 (audit).** Definition is `not cell.is_empty()`: a cell counts if it has a value (incl. the empty string `""`), a formula (even one whose current value is `None`), or non-empty `meta`. A cell set to `None` via `sheet.set` stores an *empty* cell and does NOT count; absent/deleted cells don't count. This counts empty-string cells and formula-with-None-value cells (renderer correctness) while excluding truly-empty ones, satisfying every test in the 3.3 plan. `write_csv` was refactored onto it; the only behaviour change is that a trailing explicit-empty cell no longer pads the export (untested edge case, arguably a fix). The engine *does* distinguish "never set" (absent key) from "set to None" (present empty cell) — but `used_range` treats both as not-counted because `is_empty()` is value/formula/meta-based, not key-presence-based.
 - **Recalc depth/iteration cap (`MAX_RECALC_DEPTH`).** **DEFERRED 2026-06-03 (Matthew).** Raised when adopting batch Replay (which recomputes a dependent up to N times). Not needed for correctness today: cycles are caught at registration by `_would_cycle` (→ `CIRC`), re-entry is guarded by `RecalcEngine._processing`, and `_propagate` has a topo-sort `None` fallback that marks runaway subgraphs `CIRC`. A `MAX_RECALC_DEPTH` constant (in `formula/errors.py` or a new `constants` module) plus a tripwire that bails a runaway cascade to `CIRC` is cheap belt-and-suspenders — wire it in when iterative/circular calculation or cross-sheet refs land and cycles get genuinely harder to reason about. Until then it would be redundant machinery.
 
 ## Implementation breakdown (subtasks of this part)
@@ -475,7 +475,7 @@ cell.meta["validation_rule"] = "int_range"
 | #3 | Implement event payload changes + tests | DONE 2026-06-03 |
 | #4 | Spec `Sheet.batch()` API surface | DONE 2026-06-03 |
 | #5 | Implement `Sheet.batch()` + tests + read_csv refactor | DONE 2026-06-03 |
-| #6 | Promote `used_range` to public + write_csv refactor | (small enough to skip the spec step) |
+| #6 | Promote `used_range` to public + write_csv refactor | DONE 2026-06-03 |
 | #7 | Document meta-namespacing convention | (pure docs) |
 | #8 | Verification + WORKLOG entry | Verify |
 

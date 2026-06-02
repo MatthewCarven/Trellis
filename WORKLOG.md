@@ -4,6 +4,32 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-03 — Session 21: Part 3.3 — promote used_range() to public (task #6)
+
+**What got built**
+- `src/trellis/core/sheet.py` — new public `Sheet.used_range() -> ((min_row,min_col),(max_row,max_col)) | None`. Bounding rectangle (both corners inclusive, zero-indexed) over every cell where `not cell.is_empty()`; `None` when nothing qualifies. Listed in the public-surface docstring. Single-pass implementation over `_cells`.
+- `src/trellis/io/csv.py` — `write_csv` refactored to call `sheet.used_range()` instead of computing `max_row`/`max_col` from raw `_cells` keys. CSV still anchors at A1, so only the max corner is used; the empty-file early-return now keys off `bounds is None`. Docstring updated to describe the non-empty semantics.
+- Tests: `tests/test_sheet.py` +9 — empty→None, single, sparse true-min/max, empty-string counts, set-to-None excluded, deleted excluded, formula-with-None-value counts, meta-only counts, and a CSV guard that an all-empty sheet writes an empty file.
+- `design.md` — table row #6 DONE; the `used_range` None-counting open question resolved. `README.md` — `used_range()` documented in the events/introspection section.
+
+**Design calls worth remembering**
+- **Definition is `not cell.is_empty()`, not key-presence.** Counts value cells (incl. `""`), formula cells (even with a `None` value — renderer correctness), and meta-only cells; excludes truly-empty cells (a `sheet.set(addr, None)` stores an *empty* cell) and absent/deleted cells. This is what the 3.3 plan's tests require ("empty string counts", "set to None does NOT count").
+- **Audit finding: old `write_csv` bounded by key presence**, so it *did* count present-but-empty cells. The refactor changes that in exactly one untested edge case — a trailing explicit-empty cell no longer pads the export (e.g. `A1="a"; B1=None` now writes `a`, not `a,`). Arguably a fix; flagged for Matthew. No existing test put an empty cell at the extreme of the box, so the suite is unaffected.
+- **CSV anchors at origin**, so `used_range`'s min corner is intentionally ignored by `write_csv` (it walks rows `0..max_row`, cols `0..max_col`). `used_range` still reports the true min for renderers that want it.
+
+**Status**
+- **748 passing** (739 prior + 9 new) incl. 7 doctest modules. Python 3.10 in-sandbox; baseline 3.11+ (annotation-safe).
+- Part 3.3 complete (design.md table #6 DONE).
+
+**Next pick-up**
+- Part 3.4: **document the meta-namespacing convention** — pure docs. Add the good/bad `cell.meta["<plugin>"][...]` example to `docs/plugin-example.md` and a one-line cross-ref in `CLAUDE.md` under Conventions. No code. Closes Part 3.
+- After 3.4: the plugin example package (`trellis-mathpack`) for the publication gate — the last thing before Trellis can go public.
+
+**Tool notes**
+- Source edits via python string-replacement on the mount + import smoke + `git diff` verification. WORKLOG spliced from `/tmp` with sha256 check.
+
+---
+
 ## 2026-06-03 — Session 20: Part 3.2 — Sheet.batch() (tasks #4, #5)
 
 **What got built**

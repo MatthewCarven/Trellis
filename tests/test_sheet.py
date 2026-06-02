@@ -438,3 +438,70 @@ def test_batch_delete_is_buffered_too():
     assert rec["old_value"] == 5
     assert rec["new_value"] is None
     assert rec["new"].is_empty()
+
+
+# --- Part 3.3: Sheet.used_range() ------------------------------------------
+
+
+def test_used_range_empty_sheet_returns_none():
+    assert Sheet().used_range() is None
+
+
+def test_used_range_single_cell():
+    s = Sheet()
+    s["B2"] = 1            # (1, 1)
+    assert s.used_range() == ((1, 1), (1, 1))
+
+
+def test_used_range_sparse_layout_true_min_max():
+    s = Sheet()
+    s["B2"] = 1           # (1, 1)
+    s["E10"] = 2          # (9, 4)
+    s["C7"] = 3           # (6, 2)
+    assert s.used_range() == ((1, 1), (9, 4))
+
+
+def test_used_range_empty_string_counts():
+    s = Sheet()
+    s["A1"] = ""          # "" is a value, not empty
+    assert s.used_range() == ((0, 0), (0, 0))
+
+
+def test_used_range_cell_set_to_none_does_not_count():
+    s = Sheet()
+    s["A1"] = 5
+    s["C3"] = None        # stores an empty cell; must not extend the range
+    assert s.used_range() == ((0, 0), (0, 0))
+
+
+def test_used_range_deleted_cell_does_not_count():
+    s = Sheet()
+    s["A1"] = 1
+    s["C3"] = 2
+    del s["C3"]
+    assert s.used_range() == ((0, 0), (0, 0))
+
+
+def test_used_range_formula_cell_with_none_value_counts():
+    """A formula cell counts even before it has a computed value (renderer needs it)."""
+    s = Sheet()                 # bare sheet, no recalc engine
+    s["D4"] = "=A1"            # value None, formula set
+    assert s["D4"].value is None
+    assert s.used_range() == ((3, 3), (3, 3))
+
+
+def test_used_range_meta_only_cell_counts():
+    s = Sheet()
+    c = Cell()
+    c.meta["tag"] = "x"        # value/formula None, but meta present
+    s["B2"] = c
+    assert s.used_range() == ((1, 1), (1, 1))
+
+
+def test_write_csv_all_empty_sheet_writes_empty_file(tmp_path):
+    """A sheet whose only cells are explicit-None (empty) writes an empty file."""
+    s = Sheet("S")
+    s["A1"] = None
+    out = tmp_path / "e.csv"
+    s.to_csv(out)
+    assert out.read_text(encoding="utf-8") == ""

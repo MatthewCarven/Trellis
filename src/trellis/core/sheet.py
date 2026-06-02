@@ -42,6 +42,7 @@ Public surface:
     sheet.on("cell:change", handler) -> Subscription
     sheet.on("cell:recalc", handler) -> Subscription   # post-recalc updates
     sheet.batch()           -> context manager (buffer writes, one event)
+    sheet.used_range()      -> ((minr,minc),(maxr,maxc)) | None  (non-empty extent)
 """
 
 from __future__ import annotations
@@ -304,6 +305,30 @@ class Sheet(Emitter):
         """
         from ..io.csv import write_csv
         write_csv(self, path, encoding=encoding, dialect=dialect)
+
+    # --- introspection ---------------------------------------------------
+
+    def used_range(self) -> tuple[tuple[int, int], tuple[int, int]] | None:
+        """Bounding rectangle of non-empty cells, or ``None`` if there are none.
+
+        Returns ``((min_row, min_col), (max_row, max_col))`` — both corners
+        inclusive, zero-indexed — spanning every cell that is not empty (see
+        :meth:`~trellis.core.cell.Cell.is_empty`). A cell counts if it has a
+        value (including the empty string ``""``), a formula (even one whose
+        current value is ``None``), or non-empty ``meta``. A cell explicitly
+        set to ``None`` (which stores an empty cell) and absent/deleted cells
+        do not count.
+
+        Returns ``None`` when nothing qualifies — matching the "no content is
+        a legit state" convention CSV export already uses. This is the method
+        a renderer calls every frame to ask "what extent must I walk?".
+        """
+        keys = [k for k, cell in self._cells.items() if not cell.is_empty()]
+        if not keys:
+            return None
+        rows = [r for (r, _c) in keys]
+        cols = [c for (_r, c) in keys]
+        return (min(rows), min(cols)), (max(rows), max(cols))
 
     # --- iteration -------------------------------------------------------
 

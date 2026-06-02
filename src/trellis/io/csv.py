@@ -160,12 +160,13 @@ def write_csv(
 ) -> None:
     """Write a sheet to a CSV file.
 
-    The sheet's bounding rectangle is determined by the maximum row and
-    column that contain a populated cell. All cells within that
-    rectangle are emitted; cells with value ``None`` (or absent) become
-    empty CSV fields. Formulas are written as their computed value
-    (``cell.value``), not the formula text — this matches Excel's CSV
-    export behaviour.
+    The rectangle runs from A1 to the bottom-right non-empty cell, as
+    reported by :meth:`trellis.core.sheet.Sheet.used_range` (a cell counts
+    if it has a value, a formula, or meta; a cell explicitly set to ``None``
+    is empty and does not extend the rectangle). All cells within the
+    rectangle are emitted; ``None``/absent cells become empty CSV fields.
+    Formulas are written as their computed value (``cell.value``), not the
+    formula text — matching Excel's CSV export behaviour.
 
     Parameters
     ----------
@@ -178,15 +179,16 @@ def write_csv(
     dialect
         A :mod:`csv` dialect name. Defaults to ``"excel"``.
     """
-    cells = sheet._cells
-    if not cells:
-        # Empty sheet writes an empty file. Could alternatively raise,
-        # but "no content" is a legitimate state.
+    bounds = sheet.used_range()
+    if bounds is None:
+        # No non-empty cells -> empty file. Could alternatively raise,
+        # but "no content" is a legitimate state. (A cell explicitly set
+        # to None is empty and does not extend the rectangle.)
         Path(path).write_text("", encoding=encoding)
         return
 
-    max_row = max(r for (r, _c) in cells)
-    max_col = max(c for (_r, c) in cells)
+    cells = sheet._cells
+    (_min_row, _min_col), (max_row, max_col) = bounds
 
     with Path(path).open("w", encoding=encoding, newline="") as f:
         writer = _csv.writer(f, dialect=dialect)
