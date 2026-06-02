@@ -4,6 +4,33 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-03 — Session 18: Part 3 design — pre-render engine prep (planning + commit)
+
+**What got built**
+- `design.md` — appended **Part 3: Pre-render engine prep** (+181 lines). A planning-only section (no code) that hardens the four corners of the public API that get expensive to change once Trellis is on GitHub and external plugins (incl. the eventual `trellis-tui` sister package) consume it. Authored in the 2026-05-27 working pass; committed today.
+- Four subtasks specced:
+  - **3.1 Event payload audit + lock-in** — target shape for `cell:change` (sheet, address, old/new value, old/new formula) and `cell:recalc` (+ `trigger` cell). Both old and new so undo plugins can reverse and renderers can skip no-op repaints. Lock-in tests named as contracts.
+  - **3.2 `Sheet.batch()`** — context-manager-only; suppresses per-cell `cell:change`, emits one consolidated `sheet:batch` on exit, recalcs once. Propagate-no-rollback; nested batches flatten. Bonus: refactor `read_csv` off its `_cells` bypass onto `batch()` as a real-consumer proof.
+  - **3.3 Promote `used_range()` to public Sheet API** — `((min_row,min_col),(max_row,max_col)) | None`; lift the bounding-rect helper out of `io/csv.py`, refactor `write_csv` to call it.
+  - **3.4 Meta-namespacing convention** — docs only; plugins namespace under `cell.meta["<plugin>"]`. Convention not enforcement, per open-extensibility philosophy.
+
+**Design calls worth remembering**
+- **3.1 is the time-sensitive one.** Its cost jumps from "fix one test" to "break N strangers' code" the moment Trellis publishes. Recommended as the next thing to implement, ahead of the plugin example package.
+- **Explicit "do NOT pre-build" list** in Part 3: display formatting, undo log, viewport/window abstraction, row-indexed cache, `Cell.style` field, mechanical namespace enforcement. All renderer/plugin concerns; building them in core violates `simplicity-over-clever-solvers`.
+- **Open questions deferred to the audit (#2):** include the `Cell` object in payloads or just address+values (lean: address+values, avoids mutation foot-gun); tuple vs A1 address in payloads (lean: tuple); does `used_range` count explicit-`None` cells (confirm in audit).
+
+**Status**
+- Code unchanged — Session 16–17 work (plugin discovery + CSV I/O) was already committed in `039e4a8`. This session is the design-doc catch-up only.
+- `design.md` Part 3 committed. Suggested message: `docs(design): add Part 3 — pre-render engine prep plan`.
+- Implementation breakdown table (#1–#8) defines the next chunk of roadmap.
+
+**Next pick-up**
+- Per Part 3's sequence: **#2 audit current event payloads** (read `events.py` + every `emit(...)`), then **#3 implement the locked-in payload shape + contract tests**. That's the highest-value, most time-sensitive work before publish.
+- Then: `Sheet.batch()` (#4 spec → #5 impl + read_csv refactor), `used_range()` (#6), meta-namespacing docs (#7).
+- Plugin example package (`trellis-mathpack`) still open as the publication-gate unblocker — fits after the payload lock-in.
+
+---
+
 ## 2026-05-27 — Session 17: CSV read + write (task #4)
 
 **What got built**
