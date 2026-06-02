@@ -536,3 +536,61 @@ def test_cell_recalc_payload_carries_value_and_formula_fields():
     assert ev["new_value"] == 10
     assert ev["new_formula"] == "=A1 * 2"
     assert ev["sheet"] is sh
+
+
+# --- Part 3.2: batch replay semantics --------------------------------------
+
+
+def test_batch_defers_recalc_until_exit():
+    wb, sh = make_wb()
+    sh["A1"] = 1
+    sh["B1"] = "=A1 * 10"
+    assert sh["B1"].value == 10
+    recalcs = []
+    sh.on("cell:recalc", lambda **ev: recalcs.append(to_a1(*ev["address"])))
+    with sh.batch():
+        sh["A1"] = 5
+        assert sh["B1"].value == 10   # NOT recomputed yet, inside the block
+    assert sh["B1"].value == 50       # recomputed once the batch closed
+    assert "B1" in recalcs
+
+
+def test_setting_formula_inside_batch_registers_and_evaluates_on_exit():
+    wb, sh = make_wb()
+    sh["A1"] = 4
+    with sh.batch():
+        sh["B1"] = "=A1 * 3"
+    assert sh["B1"].value == 12       # formula registered + evaluated on exit
+    # And the new dependency is live afterward.
+    sh["A1"] = 10
+    assert sh["B1"].value == 30
+
+
+def test_batch_replay_carries_per_cell_trigger():
+    wb, sh = make_wb()
+    sh["A1"] = 1
+    sh["A2"] = 1
+    sh["B1"] = "=A1 + 100"
+    sh["B2"] = "=A2 + 200"
+    triggers = {}
+    sh.on(
+        "cell:recalc",
+        lambda **ev: triggers.__setitem__(to_a1(*ev["address"]), ev["trigger"]),
+    )
+    with sh.batch():
+        sh["A1"] = 2   # triggers B1 recalc, trigger == A1 == (0, 0)
+        sh["A2"] = 2   # triggers B2 recalc, trigger == A2 == (1, 0)
+    assert triggers["B1"] == (0, 0)
+    assert triggers["B2"] == (1, 0)
+    assert sh["B1"].value == 102
+    assert sh["B2"].value == 202
+
+
+def test_detach_unsubscribes_both_change_and_batch():
+    wb, sh = make_wb()
+    sh["A1"] = 1
+    sh["B1"] = "=A1 * 2"
+    wb.recalc.detach()
+    with sh.batch():
+        sh["A1"] = 9
+    assert sh["B1"].value == 2        # engine detached: no recompute via batch

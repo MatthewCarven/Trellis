@@ -120,26 +120,32 @@ def read_csv(
     p = Path(path)
     with p.open("r", encoding=encoding, newline="") as f:
         reader = _csv.reader(f, dialect=dialect)
-        for row_idx, row in enumerate(reader):
-            for col_idx, raw in enumerate(row):
-                value = _infer_value(raw)
-                # Skip writing empty cells — they're already absent. This
-                # keeps the sparse cell dict sparse and means a CSV with
-                # ragged-right rows doesn't fill in phantom blanks.
-                if value is None:
-                    continue
-                sheet._cells[(row_idx, col_idx)] = _make_cell(value)
+        # One batch for the whole load: a single sheet:batch event instead
+        # of one cell:change per cell, and any formulas in the target
+        # workbook that reference the loaded region recompute once on exit.
+        with sheet.batch():
+            for row_idx, row in enumerate(reader):
+                for col_idx, raw in enumerate(row):
+                    value = _infer_value(raw)
+                    # Skip empty cells — they're already absent. Keeps the
+                    # sparse dict sparse; ragged-right rows don't fill in
+                    # phantom blanks.
+                    if value is None:
+                        continue
+                    sheet.set((row_idx, col_idx), _make_cell(value))
 
     return wb
 
 
 def _make_cell(value):
-    """Build a Cell with the given value, bypassing event emission.
+    """Build a plain value Cell for a loaded CSV field.
 
-    read_csv builds many cells in a tight loop. We want loading to be
-    quiet (no cell:change firing once per loaded cell, which would also
-    needlessly trigger formula recalc for every cell as we go). The
-    cell goes straight into the sheet's ``_cells`` dict.
+    Always a ``Cell(value=value)`` — never a formula, even when the text
+    starts with ``=`` (the literal-text policy). Passing a Cell instance to
+    ``sheet.set`` stores it as-is, bypassing the leading-``=`` formula
+    sugar. read_csv writes these inside a single ``sheet.batch()`` so the
+    whole load emits one ``sheet:batch`` event rather than one
+    ``cell:change`` per cell.
     """
     from ..core.cell import Cell
     return Cell(value=value)

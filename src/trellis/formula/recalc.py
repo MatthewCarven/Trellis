@@ -11,6 +11,7 @@ Architecture
 One engine per workbook. Attaching subscribes to:
 
 * ``cell:change`` on each sheet — react to user-initiated changes
+* ``sheet:batch`` on each sheet — replay a bulk write (Sheet.batch) once
 * ``sheet:add`` on the workbook — attach to new sheets as they appear
 * ``sheet:remove`` on the workbook — clean up graph entries for removed sheets
 
@@ -162,8 +163,9 @@ class RecalcEngine:
 
     def detach(self) -> None:
         """Unsubscribe everything. The engine becomes inert until reattached."""
-        for sub in self._sheet_subs.values():
-            sub()
+        for subs in self._sheet_subs.values():
+            for sub in subs:
+                sub()
         for sub in self._workbook_subs:
             sub()
         self._sheet_subs.clear()
@@ -177,22 +179,30 @@ class RecalcEngine:
         # (Part 3.1), so the handler reads them straight off the event rather
         # than closing over the loop variable. ``**ev`` tolerates the full
         # locked payload (sheet, address, old/new value+formula, old/new Cell).
-        sub = sheet.on(
+        change_sub = sheet.on(
             "cell:change",
             lambda **ev: self._on_cell_change(
                 ev["sheet"], ev["address"], ev["old"], ev["new"]
             ),
         )
-        self._sheet_subs[sheet.name] = sub
+        # A bulk write (Sheet.batch) suppresses per-cell cell:change and
+        # instead emits one sheet:batch on exit. Replay each buffered change
+        # through the normal path so formulas recompute once the batch closes.
+        batch_sub = sheet.on(
+            "sheet:batch",
+            lambda **ev: self._on_batch(ev["sheet"], ev["changes"]),
+        )
+        self._sheet_subs[sheet.name] = [change_sub, batch_sub]
 
     def _on_sheet_add(self, sheet: Sheet) -> None:
         if sheet.name not in self._sheet_subs:
             self._subscribe_sheet(sheet)
 
     def _on_sheet_remove(self, name: str, sheet: Sheet) -> None:
-        sub = self._sheet_subs.pop(name, None)
-        if sub is not None:
-            sub()
+        subs = self._sheet_subs.pop(name, None)
+        if subs is not None:
+            for sub in subs:
+                sub()
         # Drop graph entries owned by this sheet
         to_drop = [k for k in self._asts if k[0] == name]
         for k in to_drop:
@@ -218,6 +228,21 @@ class RecalcEngine:
             self._process_change(sheet, key, old, new)
         finally:
             self._processing.discard(key)
+
+    def _on_batch(self, sheet: Sheet, changes: list) -> None:
+        """Replay a batch's buffered changes through the per-cell path.
+
+        Each change recomputes independently and carries its own
+        ``trigger`` (the replayed cell), so a dependent fed by several
+        batched inputs may recompute more than once — the simple, correct
+        behaviour chosen for batches. Cycle protection is unchanged: every
+        replayed change goes through the same registration guard as a
+        single write.
+        """
+        for change in changes:
+            self._on_cell_change(
+                sheet, change["address"], change["old"], change["new"]
+            )
 
     def _process_change(self, sheet: Sheet, key: CellKey, old: Cell, new: Cell) -> None:
         # The whole recalc cascade is attributed to the cell the user changed.

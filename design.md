@@ -379,6 +379,8 @@ Both forces converge on: spend an afternoon now sharpening four edges of the API
 3. **Exception behaviour: propagate, no rollback.** If an exception is raised inside the with-block, the cells already set stay set, the buffered batch event is *not* emitted (because the batch didn't complete), and the exception propagates. No rollback — keeps the implementation simple, matches "sharp tools" philosophy. User can build transactional behaviour as a plugin if needed.
 4. **Nested batches: flatten.** An inner `sheet.batch()` inside an outer one joins the outer batch. Only the outermost `__exit__` emits and recomputes. Rationale: a function that uses `batch()` internally can be safely called from inside another batch.
 
+**DECIDED 2026-06-03 (recalc integration).** On exit the sheet emits one `sheet:batch`; the recalc engine subscribes to it and **replays each buffered change through its normal per-cell path** (Matthew's call, over a dedupe pass). Consequences: a dependent fed by several cells changed in the same batch may recompute more than once, and each `cell:recalc` keeps its own per-cell `trigger` (the replayed cell). Simpler engine, no new combined-propagation solver — consistent with `simplicity-over-clever-solvers`. The dedupe-once optimisation is available later if a real perf need appears. The `read_csv` bonus refactor landed: it now loads inside a `sheet.batch()` (writing `Cell` instances via `sheet.set` to keep the literal-`=` policy), so a load fires one `sheet:batch` and any formulas referencing the loaded region recompute once.
+
 **Implementation sketch.**
 
 ```python
@@ -462,6 +464,7 @@ cell.meta["validation_rule"] = "int_range"
 - **What's the canonical address representation in event payloads — tuple `(row, col)` or A1 string `"A1"`?** **DECIDED 2026-06-03: tuple `(row, col)`** under the key `address` (replaces the old `addr` A1-string key). `to_a1(*address)` at the human-facing edge. Matched the original lean.
 - **Does `sheet.batch()` need a `discard()` method** to abort the batch from inside the block without raising? Lean no — if discard-from-inside becomes a real need, add it then.
 - **Should `Sheet.used_range` count cells with explicit `None` values, or only "truly empty" ones?** Depends on whether the engine distinguishes "never set" from "set to None" — confirm in the audit and document the behaviour either way.
+- **Recalc depth/iteration cap (`MAX_RECALC_DEPTH`).** **DEFERRED 2026-06-03 (Matthew).** Raised when adopting batch Replay (which recomputes a dependent up to N times). Not needed for correctness today: cycles are caught at registration by `_would_cycle` (→ `CIRC`), re-entry is guarded by `RecalcEngine._processing`, and `_propagate` has a topo-sort `None` fallback that marks runaway subgraphs `CIRC`. A `MAX_RECALC_DEPTH` constant (in `formula/errors.py` or a new `constants` module) plus a tripwire that bails a runaway cascade to `CIRC` is cheap belt-and-suspenders — wire it in when iterative/circular calculation or cross-sheet refs land and cycles get genuinely harder to reason about. Until then it would be redundant machinery.
 
 ## Implementation breakdown (subtasks of this part)
 
@@ -470,8 +473,8 @@ cell.meta["validation_rule"] = "int_range"
 | #1 | Write this section (the planning task) | (this doc) |
 | #2 | Audit current event payloads | DONE 2026-06-03 |
 | #3 | Implement event payload changes + tests | DONE 2026-06-03 |
-| #4 | Spec `Sheet.batch()` API surface | Plan for #5 |
-| #5 | Implement `Sheet.batch()` + tests + read_csv refactor | Implement |
+| #4 | Spec `Sheet.batch()` API surface | DONE 2026-06-03 |
+| #5 | Implement `Sheet.batch()` + tests + read_csv refactor | DONE 2026-06-03 |
 | #6 | Promote `used_range` to public + write_csv refactor | (small enough to skip the spec step) |
 | #7 | Document meta-namespacing convention | (pure docs) |
 | #8 | Verification + WORKLOG entry | Verify |

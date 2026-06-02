@@ -410,3 +410,32 @@ class TestRoundTrip:
         # B1 is now an int, not a formula.
         assert sh2["B1"].value == 30
         assert sh2["B1"].formula is None
+
+
+def test_read_csv_emits_single_sheet_batch(tmp_path):
+    """The read_csv -> Sheet.batch refactor: one sheet:batch for the whole load."""
+    from trellis import Workbook, read_csv
+
+    p = tmp_path / "data.csv"
+    p.write_text("1,2,3\n4,5,6\n", encoding="utf-8")
+
+    wb = Workbook()
+    seen = []
+    # Subscribe before the sheet exists by watching sheet:add, then attach.
+    wb.on("sheet:add", lambda sheet: sheet.on("sheet:batch", lambda **ev: seen.append(ev)))
+    read_csv(p, workbook=wb)
+
+    assert len(seen) == 1
+    assert len(seen[0]["changes"]) == 6   # six populated cells
+
+
+def test_read_csv_leading_equals_stays_literal_after_refactor(tmp_path):
+    """The batch refactor must preserve the literal-text policy for '='."""
+    from trellis import read_csv
+
+    p = tmp_path / "f.csv"
+    p.write_text("=A1+1,hi\n", encoding="utf-8")
+    wb = read_csv(p)
+    sh = wb["Sheet1"]
+    assert sh["A1"].value == "=A1+1"   # stored as text
+    assert sh["A1"].formula is None    # NOT a formula

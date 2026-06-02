@@ -345,3 +345,96 @@ def test_cell_change_payload_on_delete_blanks_new_fields():
     assert ev["new_value"] is None
     assert ev["new_formula"] is None
     assert ev["new"].is_empty()
+
+
+# --- Part 3.2: Sheet.batch() -----------------------------------------------
+
+
+def test_batch_suppresses_per_cell_change_and_emits_one_sheet_batch():
+    s = Sheet()
+    changes = []
+    batches = []
+    s.on("cell:change", lambda **ev: changes.append(ev["address"]))
+    s.on("sheet:batch", lambda **ev: batches.append(ev))
+    with s.batch():
+        s["A1"] = 1
+        s["A2"] = 2
+        s["A3"] = 3
+    assert changes == []            # no per-cell events during the batch
+    assert len(batches) == 1        # exactly one consolidated event
+    (ev,) = batches
+    assert ev["sheet"] is s
+    assert [c["address"] for c in ev["changes"]] == [(0, 0), (1, 0), (2, 0)]
+
+
+def test_batch_change_records_match_cell_change_shape():
+    s = Sheet()
+    seen = []
+    s.on("sheet:batch", lambda **ev: seen.append(ev["changes"]))
+    with s.batch():
+        s["A1"] = "=B1*2"
+    (changes,) = seen
+    (rec,) = changes
+    assert rec["address"] == (0, 0)
+    assert rec["new_formula"] == "=B1*2"
+    assert rec["old_value"] is None
+    assert rec["new"].formula == "=B1*2"
+    assert "sheet" not in rec       # sheet lives on the top-level payload
+
+
+def test_batch_writes_land_immediately_in_store():
+    s = Sheet()
+    with s.batch():
+        s["A1"] = 7
+        assert s["A1"].value == 7   # visible inside the block, pre-emit
+    assert s["A1"].value == 7
+
+
+def test_batch_exception_propagates_no_event_no_rollback():
+    s = Sheet()
+    batches = []
+    s.on("sheet:batch", lambda **ev: batches.append(ev))
+    with pytest.raises(ValueError):
+        with s.batch():
+            s["A1"] = 1
+            raise ValueError("boom")
+    assert batches == []            # buffered event discarded
+    assert s["A1"].value == 1       # no rollback — the write stands
+    assert s._batch_depth == 0      # depth cleanly unwound
+
+
+def test_nested_batches_flatten_to_one_event():
+    s = Sheet()
+    batches = []
+    s.on("sheet:batch", lambda **ev: batches.append(ev))
+    with s.batch():
+        s["A1"] = 1
+        with s.batch():
+            s["A2"] = 2
+        s["A3"] = 3
+    assert len(batches) == 1
+    assert [c["address"] for c in batches[0]["changes"]] == [(0, 0), (1, 0), (2, 0)]
+
+
+def test_empty_batch_emits_nothing():
+    s = Sheet()
+    batches = []
+    s.on("sheet:batch", lambda **ev: batches.append(ev))
+    with s.batch():
+        pass
+    assert batches == []
+
+
+def test_batch_delete_is_buffered_too():
+    s = Sheet()
+    s["A1"] = 5
+    batches = []
+    s.on("sheet:batch", lambda **ev: batches.append(ev["changes"]))
+    with s.batch():
+        del s["A1"]
+    (changes,) = batches
+    (rec,) = changes
+    assert rec["address"] == (0, 0)
+    assert rec["old_value"] == 5
+    assert rec["new_value"] is None
+    assert rec["new"].is_empty()

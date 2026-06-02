@@ -82,6 +82,7 @@ sh["A1"] = 100     # prints: Demo!A1: 42 -> 100
 Events emitted today:
 
 - `Sheet` — `"cell:change"` (user-initiated writes) and `"cell:recalc"` (recalc-engine writes to dependent formula cells). Both payloads carry `sheet`, `address` (a zero-indexed `(row, col)` tuple), `old_value`/`new_value`, `old_formula`/`new_formula`, and the live `old`/`new` `Cell` objects. `cell:recalc` additionally carries `trigger` — the `(row, col)` of the user change that started the recalc cascade (`None` for a standalone recompute).
+- `Sheet` — `"sheet:batch"` (fired once when a `with sheet.batch():` block exits cleanly) carrying `sheet` and `changes` (a list of per-cell change dicts, each shaped like a `cell:change` payload minus `sheet`). Per-cell `cell:change` is suppressed inside a batch.
 - `Workbook` — `"sheet:add"`, `"sheet:remove"`, `"sheet:rename"`.
 - Subscribe with `"*"` to receive every event from a given emitter.
 

@@ -4,6 +4,35 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-03 — Session 20: Part 3.2 — Sheet.batch() (tasks #4, #5)
+
+**What got built**
+- `src/trellis/core/sheet.py` — `Sheet.batch()` context manager + module-level `_BatchContext`. New per-instance state `_batch_depth` / `_batch_changes`. `set`/`delete` now funnel through `_emit_or_buffer_change(key, old, new)`, which builds the locked Part 3.1 change dict and either emits `cell:change` (normal) or appends to the buffer (inside a batch). On the **outermost** clean exit the sheet emits one `sheet:batch` carrying `sheet` + `changes` (list of per-cell dicts in write order, each = a `cell:change` payload minus `sheet`). Public-surface docstring lists `sheet.batch()`.
+- `src/trellis/formula/recalc.py` — engine now subscribes to **both** `cell:change` and `sheet:batch` per sheet; `_sheet_subs[name]` holds a list of subscriptions (detach + `_on_sheet_remove` updated to unsubscribe all). New `_on_batch` replays each buffered change through `_on_cell_change` — normal per-cell path, so per-cell `trigger` is preserved.
+- `src/trellis/io/csv.py` — **bonus refactor landed.** `read_csv` loads inside `with sheet.batch():`, writing `Cell` instances via `sheet.set` (Cell-instance path bypasses the leading-`=` formula sugar, preserving the literal-text policy). One `sheet:batch` per load instead of N silent direct-writes; formulas in a target workbook that reference the loaded region now recompute once on exit (previously they silently didn't). `_make_cell` docstring refreshed.
+- `src/trellis/core/workbook.py` — docstring hint now points at `with sheet.batch(): ...` as the structured bulk-write path (detach still mentioned as the skip-recalc-entirely escape hatch).
+- Tests: `tests/test_sheet.py` +7 (suppression+one event, record shape, immediate store visibility, exception propagate/no-rollback/depth-unwind, nested flatten, empty-batch-silent, buffered delete). `tests/test_recalc.py` +4 (defer-until-exit, formula-set-in-batch registers on exit, per-cell trigger on replay, detach unsubscribes batch too). `tests/test_io_csv.py` +2 (single sheet:batch per load, leading-`=` stays literal after refactor).
+- `README.md` — `sheet:batch` added to the events list. `design.md` — table rows #4/#5 marked DONE; the recalc-integration decision (Replay, per-cell trigger, read_csv refactored) recorded under subtask 3.2.
+
+**Design calls worth remembering**
+- **Batch ↔ recalc = Replay, not dedupe** (Matthew's call). Engine replays each buffered change per-cell on `sheet:batch`; a dependent fed by several batched inputs may recompute >1×, and each `cell:recalc` keeps its own per-cell `trigger`. Simpler engine, no combined-propagation solver — per `simplicity-over-clever-solvers`. Dedupe-once stays available if a perf need ever shows up.
+- **`read_csv` refactor is a net correctness win, not just an API proof.** CSV never loads formulas (literal-`=` policy), so the replay is a cheap no-op for fresh loads; but loading into a workbook whose formulas reference the region now recomputes them (previously a silent gap). Cost on the CSV hot path is a few dict lookups per cell — acceptable given `trellis-file-io-csv-only`.
+- **No rollback on exception, by design.** Cells written before the raise stay written; the buffered `sheet:batch` is discarded; depth unwinds cleanly via the nested-decrement. Transactional behaviour is a plugin's job.
+- **`MAX_RECALC_DEPTH` deferred (Matthew).** Replay raised the question; cycles are already handled (`_would_cycle` → CIRC, `_processing` re-entry guard, `_propagate` topo `None` fallback), so a depth cap is redundant belt-and-suspenders today. Documented in design.md Open Questions as a guard to wire in when iterative/cross-sheet calc lands.
+
+**Status**
+- **739 passing** (726 prior + 13 new) incl. 7 doctest modules, via `PYTHONPATH=src pytest tests/ --doctest-modules src/trellis`. Python 3.10 in-sandbox; baseline is 3.11+ (annotation-safe, re-confirm on 3.11 if convenient).
+- Part 3.2 complete (design.md table #4, #5 DONE).
+
+**Next pick-up**
+- Part 3.3: **promote `used_range()` to public `Sheet` API** (lift the bounding-rect helper out of `io/csv.py`, refactor `write_csv` to call it). Small — design says skip the spec step. Watch the audit question: do explicit-`None` / empty-string cells count? (write_csv's current behaviour is the reference.)
+- Then 3.3 → 3.4 (meta-namespacing docs, pure docs). After that the plugin example package (`trellis-mathpack`) for the publication gate.
+
+**Tool notes**
+- Source edits via python string-replacement on the mount + import smoke + `git diff` verification (Edit-truncation caution). WORKLOG spliced from `/tmp` with sha256 check.
+
+---
+
 ## 2026-06-03 — Session 19: Part 3.1 — event payload lock-in (tasks #2, #3)
 
 **What got built**

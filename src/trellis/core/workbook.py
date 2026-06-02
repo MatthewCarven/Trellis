@@ -13,9 +13,10 @@ in every sheet, subscribe to ``"sheet:add"`` here and attach a
 
 Each Workbook auto-attaches a :class:`~trellis.formula.recalc.RecalcEngine`
 on construction, exposed as ``wb.recalc``. The engine subscribes to every
-sheet's ``cell:change`` (and ``sheet:add`` here) so formula cells recompute
-automatically. For batch operations where you want to skip per-cell recalc,
-call ``wb.recalc.detach()`` first.
+sheet's ``cell:change`` and ``sheet:batch`` (and ``sheet:add`` here) so
+formula cells recompute automatically. For a bulk write that should emit one
+event and recompute once at the end, use ``with sheet.batch(): ...``. To skip
+recalc entirely during a load, ``wb.recalc.detach()`` first, then re-attach.
 """
 
 from __future__ import annotations

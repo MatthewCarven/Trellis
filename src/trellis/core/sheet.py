@@ -41,6 +41,7 @@ Public surface:
     len(sheet)              -> number of stored cells
     sheet.on("cell:change", handler) -> Subscription
     sheet.on("cell:recalc", handler) -> Subscription   # post-recalc updates
+    sheet.batch()           -> context manager (buffer writes, one event)
 """
 
 from __future__ import annotations
@@ -106,6 +107,11 @@ class Sheet(Emitter):
         self.name = name
         self._cells: dict[tuple[int, int], Cell] = {}
         self.meta: dict[str, Any] = {}  # plugin scratch space; core never writes here
+        # Batch state (see Sheet.batch). _batch_depth > 0 means writes are
+        # buffered into _batch_changes and the per-cell cell:change is
+        # suppressed until the outermost batch exits.
+        self._batch_depth = 0
+        self._batch_changes: list[dict] = []
 
     # --- single-cell access ----------------------------------------------
 
@@ -134,17 +140,7 @@ class Sheet(Emitter):
         else:
             new = Cell(value=value)
         self._cells[key] = new
-        self.emit(
-            "cell:change",
-            sheet=self,
-            address=key,
-            old_value=old.value,
-            new_value=new.value,
-            old_formula=old.formula,
-            new_formula=new.formula,
-            old=old,
-            new=new,
-        )
+        self._emit_or_buffer_change(key, old, new)
 
     def delete(self, addr: Address) -> None:
         """Remove the cell at ``addr`` if present.
@@ -155,18 +151,64 @@ class Sheet(Emitter):
         key = _coerce(addr)
         old = self._cells.pop(key, None)
         if old is not None:
-            blank = Cell()
-            self.emit(
-                "cell:change",
-                sheet=self,
-                address=key,
-                old_value=old.value,
-                new_value=None,
-                old_formula=old.formula,
-                new_formula=None,
-                old=old,
-                new=blank,
-            )
+            self._emit_or_buffer_change(key, old, Cell())
+
+    # --- change dispatch / batching --------------------------------------
+
+    def _emit_or_buffer_change(self, key: tuple[int, int], old: Cell, new: Cell) -> None:
+        """Emit ``cell:change`` for one write, or buffer it inside a batch.
+
+        Builds the locked Part 3.1 payload (``sheet``, ``address``,
+        ``old_value``/``new_value``, ``old_formula``/``new_formula``,
+        ``old``/``new``). Outside a batch it emits immediately. Inside a
+        batch (``_batch_depth > 0``) it appends to ``_batch_changes`` and
+        stays silent; the consolidated ``sheet:batch`` fires when the
+        outermost batch exits.
+        """
+        change = {
+            "address": key,
+            "old_value": old.value,
+            "new_value": new.value,
+            "old_formula": old.formula,
+            "new_formula": new.formula,
+            "old": old,
+            "new": new,
+        }
+        if self._batch_depth > 0:
+            self._batch_changes.append(change)
+        else:
+            self.emit("cell:change", sheet=self, **change)
+
+    def batch(self) -> "_BatchContext":
+        """Group many writes into one event and one deferred recalc.
+
+        Use as a context manager::
+
+            with sheet.batch():
+                sheet["A1"] = 1
+                sheet["A2"] = 2
+
+        While the block is open, per-cell ``cell:change`` events are
+        suppressed (the writes still land in the cell store immediately).
+        When the *outermost* batch exits cleanly, the sheet emits one
+        ``"sheet:batch"`` event carrying ``sheet`` and ``changes`` — a list
+        of per-cell change dicts in write order, each shaped like a
+        ``cell:change`` payload minus ``sheet``.
+
+        The recalc engine listens for ``sheet:batch`` and replays each
+        change through its normal per-cell path, so formulas recompute when
+        the batch closes rather than on every intermediate write.
+
+        Semantics:
+
+        * **Nested batches flatten.** Only the outermost ``__exit__`` emits
+          and triggers recalc; inner blocks just join the outer batch.
+        * **Exceptions propagate, no rollback.** If the block raises, cells
+          already written stay written, the buffered ``sheet:batch`` event
+          is NOT emitted, and the exception propagates. Build transactional
+          behaviour as a plugin if you need it.
+        """
+        return _BatchContext(self)
 
     # --- non-emitting write path (recalc engine use) ---------------------
 
@@ -278,3 +320,26 @@ class Sheet(Emitter):
 
     def __repr__(self) -> str:
         return f"Sheet(name={self.name!r}, cells={len(self._cells)})"
+
+
+class _BatchContext:
+    """Context manager returned by :meth:`Sheet.batch`. See that method."""
+
+    __slots__ = ("_sheet",)
+
+    def __init__(self, sheet: Sheet):
+        self._sheet = sheet
+
+    def __enter__(self) -> "_BatchContext":
+        self._sheet._batch_depth += 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        sheet = self._sheet
+        sheet._batch_depth -= 1
+        if sheet._batch_depth == 0:
+            changes = sheet._batch_changes
+            sheet._batch_changes = []
+            if exc_type is None and changes:
+                sheet.emit("sheet:batch", sheet=sheet, changes=changes)
+        return False  # never suppress exceptions
