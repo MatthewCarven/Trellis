@@ -3,6 +3,7 @@
 import pytest
 
 from trellis import Cell, Range, Sheet
+from trellis.core.address import to_a1
 
 
 def test_empty_sheet():
@@ -130,7 +131,7 @@ def test_repr_includes_name_and_count():
 def test_sheet_emits_cell_change_on_set():
     s = Sheet()
     events = []
-    s.on("cell:change", lambda addr, old, new: events.append((addr, old.value, new.value)))
+    s.on("cell:change", lambda **ev: events.append((to_a1(*ev["address"]), ev["old_value"], ev["new_value"])))
     s["A1"] = 5
     s["A1"] = 10
     s["B2"] = "hello"
@@ -145,7 +146,7 @@ def test_sheet_emits_cell_change_on_delete_of_existing():
     s = Sheet()
     s["A1"] = 5
     events = []
-    s.on("cell:change", lambda addr, old, new: events.append((addr, old.value, new.is_empty())))
+    s.on("cell:change", lambda **ev: events.append((to_a1(*ev["address"]), ev["old_value"], ev["new"].is_empty())))
     del s["A1"]
     assert events == [("A1", 5, True)]
 
@@ -162,7 +163,7 @@ def test_sheet_does_not_emit_on_delete_of_absent():
 def test_sheet_emits_when_set_with_formula_string():
     s = Sheet()
     events = []
-    s.on("cell:change", lambda addr, old, new: events.append((addr, new.formula)))
+    s.on("cell:change", lambda **ev: events.append((to_a1(*ev["address"]), ev["new_formula"])))
     s["A1"] = "=B1*2"
     assert events == [("A1", "=B1*2")]
 
@@ -172,7 +173,7 @@ def test_sheet_emits_when_set_with_cell_instance():
     custom = Cell(value=42)
     custom.meta["tag"] = "x"
     events = []
-    s.on("cell:change", lambda addr, old, new: events.append((addr, new is custom)))
+    s.on("cell:change", lambda **ev: events.append((to_a1(*ev["address"]), ev["new"] is custom)))
     s["A1"] = custom
     assert events == [("A1", True)]
 
@@ -182,7 +183,7 @@ def test_sheet_set_to_same_value_still_emits():
     s = Sheet()
     s["A1"] = 5
     events = []
-    s.on("cell:change", lambda **kw: events.append(kw["addr"]))
+    s.on("cell:change", lambda **kw: events.append(to_a1(*kw["address"])))
     s["A1"] = 5
     assert events == ["A1"]
 
@@ -264,7 +265,7 @@ def test_single_cell_tuple_access_still_returns_cell():
 def test_range_assignment_fires_cell_change_per_cell():
     s = Sheet()
     events = []
-    s.on("cell:change", lambda addr, **kw: events.append(addr))
+    s.on("cell:change", lambda **ev: events.append(to_a1(*ev["address"])))
     s["A1:B2"] = 0
     assert events == ["A1", "B1", "A2", "B2"]
 
@@ -273,3 +274,74 @@ def test_invalid_range_part_raises():
     s = Sheet()
     with pytest.raises(ValueError):
         s["A1:not-an-address"] = 1
+
+
+# --- Part 3.1: event payload contract lock-in ------------------------------
+# These tests pin the public shape of cell:change. Once external plugins read
+# these fields, the shape is a contract — change them only with a deprecation.
+
+
+def test_cell_change_payload_carries_old_and_new_value():
+    s = Sheet()
+    s["A1"] = 5
+    seen = []
+    s.on("cell:change", lambda **ev: seen.append(ev))
+    s["A1"] = 10
+    (ev,) = seen
+    assert ev["old_value"] == 5
+    assert ev["new_value"] == 10
+
+
+def test_cell_change_payload_address_is_zero_indexed_tuple():
+    s = Sheet()
+    seen = []
+    s.on("cell:change", lambda **ev: seen.append(ev["address"]))
+    s["A1"] = 1   # (0, 0)
+    s["C2"] = 2   # (1, 2)
+    assert seen == [(0, 0), (1, 2)]
+
+
+def test_cell_change_payload_includes_sheet():
+    s = Sheet("Demo")
+    seen = []
+    s.on("cell:change", lambda **ev: seen.append(ev["sheet"]))
+    s["A1"] = 1
+    assert seen == [s]
+
+
+def test_cell_change_payload_includes_formula_source_when_set():
+    s = Sheet()
+    seen = []
+    s.on("cell:change", lambda **ev: seen.append(ev))
+    s["A1"] = "=B1*2"
+    (ev,) = seen
+    assert ev["new_formula"] == "=B1*2"
+    assert ev["old_formula"] is None
+    assert ev["new_value"] is None  # formula not yet evaluated on a bare sheet
+
+
+def test_cell_change_payload_includes_live_cell_objects():
+    """Per the Part 3.1 decision: the live Cell is carried alongside scalars."""
+    s = Sheet()
+    custom = Cell(value=42)
+    seen = []
+    s.on("cell:change", lambda **ev: seen.append(ev))
+    s["A1"] = custom
+    (ev,) = seen
+    assert ev["new"] is custom
+    assert isinstance(ev["old"], Cell)
+    assert ev["old"].is_empty()
+
+
+def test_cell_change_payload_on_delete_blanks_new_fields():
+    s = Sheet()
+    s["A1"] = "=B1"
+    seen = []
+    s.on("cell:change", lambda **ev: seen.append(ev))
+    del s["A1"]
+    (ev,) = seen
+    assert ev["old_value"] is None
+    assert ev["old_formula"] == "=B1"
+    assert ev["new_value"] is None
+    assert ev["new_formula"] is None
+    assert ev["new"].is_empty()

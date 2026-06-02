@@ -64,10 +64,15 @@ Three flavours of hook, depending on what you need.
 from trellis import Workbook
 
 wb = Workbook()
-# Wire a cell-change logger onto every sheet as it's added:
+# Wire a cell-change logger onto every sheet as it's added.
+# Handlers take **ev (the payload is a keyword dict); read the
+# fields you care about. `address` is a zero-indexed (row, col) tuple.
+from trellis.core.address import to_a1
+
 wb.on("sheet:add", lambda sheet:
-    sheet.on("cell:change", lambda addr, old, new:
-        print(f"{sheet.name}!{addr}: {old.value!r} -> {new.value!r}")))
+    sheet.on("cell:change", lambda **ev:
+        print(f"{ev['sheet'].name}!{to_a1(*ev['address'])}: "
+              f"{ev['old_value']!r} -> {ev['new_value']!r}")))
 
 sh = wb.add_sheet("Demo")
 sh["A1"] = 42      # prints: Demo!A1: None -> 42
@@ -76,7 +81,7 @@ sh["A1"] = 100     # prints: Demo!A1: 42 -> 100
 
 Events emitted today:
 
-- `Sheet` — `"cell:change"` (user-initiated writes) and `"cell:recalc"` (recalc-engine writes to dependent formula cells). Both carry `addr`, `old`, `new`.
+- `Sheet` — `"cell:change"` (user-initiated writes) and `"cell:recalc"` (recalc-engine writes to dependent formula cells). Both payloads carry `sheet`, `address` (a zero-indexed `(row, col)` tuple), `old_value`/`new_value`, `old_formula`/`new_formula`, and the live `old`/`new` `Cell` objects. `cell:recalc` additionally carries `trigger` — the `(row, col)` of the user change that started the recalc cascade (`None` for a standalone recompute).
 - `Workbook` — `"sheet:add"`, `"sheet:remove"`, `"sheet:rename"`.
 - Subscribe with `"*"` to receive every event from a given emitter.
 

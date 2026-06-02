@@ -458,8 +458,8 @@ cell.meta["validation_rule"] = "int_range"
 
 ## Open questions
 
-- **Should `cell:change` include the `Cell` object itself, or just the address + values?** Lean address + values only — passing the live cell encourages plugins to mutate it from inside an event handler, which is a foot-gun. Address lets them look it up if they really want to. Decide in the audit (3.1).
-- **What's the canonical address representation in event payloads — tuple `(row, col)` or A1 string `"A1"`?** Lean tuple, with `address.to_a1((r, c))` one import away. Tuples are cheaper and unambiguous; A1 strings are for the human-facing edge. Decide in 3.1.
+- **Should `cell:change` include the `Cell` object itself, or just the address + values?** **DECIDED 2026-06-03 (against the original lean): include the live `Cell`** as `old`/`new` *alongside* the scalar `old_value`/`new_value`/`old_formula`/`new_formula` fields. Matthew's call — sharp-tools/give-everything over guard-rails; also keeps existing `old`/`new` subscribers (incl. the recalc engine) working. The mutation foot-gun is accepted as the plugin author's responsibility.
+- **What's the canonical address representation in event payloads — tuple `(row, col)` or A1 string `"A1"`?** **DECIDED 2026-06-03: tuple `(row, col)`** under the key `address` (replaces the old `addr` A1-string key). `to_a1(*address)` at the human-facing edge. Matched the original lean.
 - **Does `sheet.batch()` need a `discard()` method** to abort the batch from inside the block without raising? Lean no — if discard-from-inside becomes a real need, add it then.
 - **Should `Sheet.used_range` count cells with explicit `None` values, or only "truly empty" ones?** Depends on whether the engine distinguishes "never set" from "set to None" — confirm in the audit and document the behaviour either way.
 
@@ -468,8 +468,8 @@ cell.meta["validation_rule"] = "int_range"
 | Task ID | What | Plan/Implement |
 |---------|------|----------------|
 | #1 | Write this section (the planning task) | (this doc) |
-| #2 | Audit current event payloads | Plan for #3 |
-| #3 | Implement event payload changes + tests | Implement |
+| #2 | Audit current event payloads | DONE 2026-06-03 |
+| #3 | Implement event payload changes + tests | DONE 2026-06-03 |
 | #4 | Spec `Sheet.batch()` API surface | Plan for #5 |
 | #5 | Implement `Sheet.batch()` + tests + read_csv refactor | Implement |
 | #6 | Promote `used_range` to public + write_csv refactor | (small enough to skip the spec step) |

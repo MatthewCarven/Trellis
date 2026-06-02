@@ -4,6 +4,38 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-03 — Session 19: Part 3.1 — event payload lock-in (tasks #2, #3)
+
+**What got built**
+- `src/trellis/core/sheet.py` — `cell:change` and `cell:recalc` payloads reshaped to the locked Part 3.1 contract. Both now emit: `sheet` (the Sheet), `address` (zero-indexed `(row, col)` tuple, replacing the old `addr` A1-string key), `old_value`/`new_value`, `old_formula`/`new_formula`, and the live `old`/`new` `Cell` objects. `_set_value` gained a keyword-only `trigger: tuple[int,int] | None = None` param and `cell:recalc` carries it. `set`/`delete`/`_set_value` emit blocks rewritten; module docstring updated; the class doctest updated (address is now a tuple — `[(0, 0), (1, 1)]`).
+- `src/trellis/formula/recalc.py` — internal consumer updated to the new shape. The `cell:change` subscriber lambda is now `lambda **ev: self._on_cell_change(ev["sheet"], ev["address"], ev["old"], ev["new"])`. `_on_cell_change` takes an `address` tuple. `trigger = (key[1], key[2])` (the originating user-changed cell) is derived in `_process_change` and threaded through `_propagate`, `_evaluate_and_write`, `_write`, and the NAME/CIRC `_set_value` calls, so every recalc in a cascade reports the cell that started it.
+- `tests/test_sheet.py` — 6 new named contract lock-in tests (`...carries_old_and_new_value`, `...address_is_zero_indexed_tuple`, `...includes_sheet`, `...includes_formula_source_when_set`, `...includes_live_cell_objects`, `...on_delete_blanks_new_fields`). Existing event handlers migrated to `**ev` + `to_a1(*ev["address"])`.
+- `tests/test_recalc.py` — 3 new contract tests (`...includes_trigger_cell`, `...trigger_is_none_for_standalone_set_value`, `...carries_value_and_formula_fields`). Existing handlers migrated.
+- `tests/test_range.py` — 2 event handlers migrated.
+- `README.md` — events example + "Events emitted today" list rewritten to the new payload (handlers take `**ev`; documents all fields incl. `trigger`).
+- `design.md` — the two 3.1 open questions marked DECIDED; implementation table rows #2/#3 marked DONE.
+
+**Design calls worth remembering**
+- **Address is a tuple, not an A1 string.** Payload key renamed `addr` → `address`, value is `(row, col)`. `to_a1(*address)` at the human edge. (Matched the doc's lean.)
+- **Live `Cell` is included AND the scalar fields.** Matthew chose this *against* the doc's original lean (which was values-only). Rationale: sharp-tools/give-everything, and it keeps every existing `old`/`new` subscriber — including the recalc engine, which reads `new.formula` — working unchanged. Mutation-during-emit is accepted as the handler author's responsibility.
+- **`trigger` = the originating user-changed cell, shared across the whole cascade.** Setting a formula cell fires its own `cell:recalc` with `trigger` == its own address; dependents fire with `trigger` == the user-changed cell. Confirmed by smoke test: `B1='=A1*3'` then `A1=4` → B1 recalc with `trigger=(0,0)`.
+- **Handlers now effectively must take `**kwargs`.** `Emitter.emit` does `handler(**payload)`, so with 8 keys a fixed-signature handler `lambda addr, old, new` raises. All internal handlers and the README example use `**ev`. Worth a note in the eventual plugin docs.
+
+**Status**
+- **726 passing** (719 tests + 7 doctest modules) via `PYTHONPATH=src pytest tests/ --doctest-modules src/trellis`. Was 710 pre-change; +9 new contract tests, ~17 existing handlers migrated, 0 regressions.
+- Ran under Python 3.10 in this sandbox (no 3.11 available); project baseline is 3.11+. Code uses only `from __future__ import annotations`-safe typing, so this is a test-runner caveat, not a code change — re-confirm on 3.11 if convenient.
+- Part 3.1 implementation (table #2, #3) complete. design.md decisions recorded.
+
+**Next pick-up**
+- Per the Part 3 table: **#4 spec `Sheet.batch()`** (the four decisions: context-manager-only, consolidated `sheet:batch` event, propagate-no-rollback, nested-flatten) → **#5 implement + refactor `read_csv` onto it**. The locked event payload from this session is the foundation `sheet:batch` builds on.
+- Then #6 `used_range()` public, #7 meta-namespacing docs.
+- Plugin example package (`trellis-mathpack`) still open as the publication-gate unblocker.
+
+**Tool notes**
+- Source edits applied via python string-replacement on the mount + `git diff` verification (per the Edit-truncation caution). WORKLOG spliced from `/tmp` with sha256 check.
+
+---
+
 ## 2026-06-03 — Session 18: Part 3 design — pre-render engine prep (planning + commit)
 
 **What got built**

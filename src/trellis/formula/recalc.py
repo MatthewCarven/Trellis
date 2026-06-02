@@ -173,12 +173,15 @@ class RecalcEngine:
     # --- Sheet/Workbook subscription handlers --------------------------
 
     def _subscribe_sheet(self, sheet: Sheet) -> None:
-        # Bind sheet via default-arg so the closure captures the right
-        # sheet (not just `sheet`, which can rebind in loops).
+        # The cell:change payload carries its own ``sheet`` and ``address``
+        # (Part 3.1), so the handler reads them straight off the event rather
+        # than closing over the loop variable. ``**ev`` tolerates the full
+        # locked payload (sheet, address, old/new value+formula, old/new Cell).
         sub = sheet.on(
             "cell:change",
-            lambda addr, old, new, _sheet=sheet:
-                self._on_cell_change(_sheet, addr, old, new),
+            lambda **ev: self._on_cell_change(
+                ev["sheet"], ev["address"], ev["old"], ev["new"]
+            ),
         )
         self._sheet_subs[sheet.name] = sub
 
@@ -204,8 +207,10 @@ class RecalcEngine:
 
     # --- cell:change handler -------------------------------------------
 
-    def _on_cell_change(self, sheet: Sheet, addr: str, old: Cell, new: Cell) -> None:
-        key = self._key(sheet.name, addr)
+    def _on_cell_change(
+        self, sheet: Sheet, address: tuple[int, int], old: Cell, new: Cell
+    ) -> None:
+        key = self._key(sheet.name, address)
         if key in self._processing:
             return
         self._processing.add(key)
@@ -215,6 +220,9 @@ class RecalcEngine:
             self._processing.discard(key)
 
     def _process_change(self, sheet: Sheet, key: CellKey, old: Cell, new: Cell) -> None:
+        # The whole recalc cascade is attributed to the cell the user changed.
+        trigger = (key[1], key[2])
+
         # Step 1: deregister any old formula bindings for this cell.
         if key in self._asts:
             self._remove_deps(key)
@@ -225,15 +233,15 @@ class RecalcEngine:
             try:
                 ast = parse_formula(new.formula)
             except ParseError:
-                sheet._set_value((key[1], key[2]), NAME)
-                self._propagate(key)
+                sheet._set_value((key[1], key[2]), NAME, trigger=trigger)
+                self._propagate(key, trigger)
                 return
 
             deps = extract_deps(ast, sheet.name)
 
             if self._would_cycle(key, deps):
-                sheet._set_value((key[1], key[2]), CIRC)
-                self._propagate(key)
+                sheet._set_value((key[1], key[2]), CIRC, trigger=trigger)
+                self._propagate(key, trigger)
                 return
 
             self._asts[key] = ast
@@ -241,11 +249,11 @@ class RecalcEngine:
                 self._dependents[d].add(key)
                 self._dependencies[key].add(d)
 
-            self._evaluate_and_write(key)
+            self._evaluate_and_write(key, trigger)
 
         # Step 3: propagate to transitive dependents. Value-only cells can
         # have dependents too (a formula reading them).
-        self._propagate(key)
+        self._propagate(key, trigger)
 
     # --- graph maintenance ---------------------------------------------
 
@@ -281,7 +289,7 @@ class RecalcEngine:
 
     # --- propagate / evaluate -----------------------------------------
 
-    def _propagate(self, key: CellKey) -> None:
+    def _propagate(self, key: CellKey, trigger: tuple[int, int] | None = None) -> None:
         """Recompute everything that transitively depends on ``key``."""
         affected = self._transitive_dependents(key)
         if not affected:
@@ -292,10 +300,10 @@ class RecalcEngine:
             # registered formula cells is acyclic and this never fires. If
             # it ever does, mark them all CIRC so we don't infinite-loop.
             for k in affected:
-                self._write(k, CIRC)
+                self._write(k, CIRC, trigger)
             return
         for k in ordered:
-            self._evaluate_and_write(k)
+            self._evaluate_and_write(k, trigger)
 
     def _transitive_dependents(self, root: CellKey) -> set[CellKey]:
         """All cells (excluding root) that depend on root via any chain."""
@@ -330,20 +338,24 @@ class RecalcEngine:
             return None
         return ordered
 
-    def _evaluate_and_write(self, key: CellKey) -> None:
+    def _evaluate_and_write(
+        self, key: CellKey, trigger: tuple[int, int] | None = None
+    ) -> None:
         ast = self._asts.get(key)
         if ast is None or self._workbook is None:
             return
         sheet = self._workbook[key[0]]
         ctx = Context(sheet=sheet, current_cell=(key[1], key[2]))
         result = evaluate(ast, ctx)
-        sheet._set_value((key[1], key[2]), result)
+        sheet._set_value((key[1], key[2]), result, trigger=trigger)
 
-    def _write(self, key: CellKey, value: Any) -> None:
+    def _write(
+        self, key: CellKey, value: Any, trigger: tuple[int, int] | None = None
+    ) -> None:
         if self._workbook is None:
             return
         sheet = self._workbook[key[0]]
-        sheet._set_value((key[1], key[2]), value)
+        sheet._set_value((key[1], key[2]), value, trigger=trigger)
 
     # --- helpers --------------------------------------------------------
 

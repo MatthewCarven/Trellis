@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from trellis import Sheet, Workbook
+from trellis.core.address import to_a1
 from trellis.formula import (
     CIRC,
     DIV0,
@@ -49,8 +50,8 @@ def test_set_value_emits_cell_recalc_not_cell_change():
     s["A1"] = "=B1"
     changes = []
     recalcs = []
-    s.on("cell:change", lambda addr, old, new: changes.append(addr))
-    s.on("cell:recalc", lambda addr, old, new: recalcs.append((addr, new.value)))
+    s.on("cell:change", lambda **ev: changes.append(to_a1(*ev["address"])))
+    s.on("cell:recalc", lambda **ev: recalcs.append((to_a1(*ev["address"]), ev["new_value"])))
     s._set_value("A1", 99)
     assert changes == []
     assert recalcs == [("A1", 99)]
@@ -61,7 +62,7 @@ def test_set_value_event_payload_shape_matches_cell_change():
     s["A1"] = "=B1"
     payloads = []
     s.on("cell:recalc",
-         lambda addr, old, new: payloads.append((old.value, new.value)))
+         lambda **ev: payloads.append((ev["old_value"], ev["new_value"])))
     s._set_value("A1", 1)
     s._set_value("A1", 2)
     assert payloads == [(None, 1), (1, 2)]
@@ -170,7 +171,7 @@ def test_setting_dep_to_same_value_still_recalcs():
     sh["A1"] = 10
     sh["B1"] = "=A1 + 5"
     calls = []
-    sh.on("cell:recalc", lambda addr, old, new: calls.append(addr))
+    sh.on("cell:recalc", lambda **ev: calls.append(to_a1(*ev["address"])))
     sh["A1"] = 10  # same value
     assert "B1" in calls
 
@@ -198,7 +199,7 @@ def test_chain_recalc_visits_each_dependent_once():
     sh["B1"] = "=A1 + 1"
     sh["C1"] = "=A1 + B1"  # depends on both A1 directly and via B1
     visits = []
-    sh.on("cell:recalc", lambda addr, old, new: visits.append(addr))
+    sh.on("cell:recalc", lambda **ev: visits.append(to_a1(*ev["address"])))
     sh["A1"] = 10
     assert visits.count("C1") == 1
     assert sh["C1"].value == 21  # 10 + 11
@@ -249,7 +250,7 @@ def test_changing_formula_reroutes_dependencies():
     assert sh["B1"].value == 20
     # Changes to A1 should NOT trigger B1
     visits = []
-    sh.on("cell:recalc", lambda addr, old, new: visits.append(addr))
+    sh.on("cell:recalc", lambda **ev: visits.append(to_a1(*ev["address"])))
     sh["A1"] = 999
     assert "B1" not in visits
     # But A2 changes still do
@@ -264,7 +265,7 @@ def test_replacing_formula_with_value_drops_deps():
     sh["B1"] = "=A1"
     sh["B1"] = 99   # overwrite formula with plain value
     visits = []
-    sh.on("cell:recalc", lambda addr, old, new: visits.append(addr))
+    sh.on("cell:recalc", lambda **ev: visits.append(to_a1(*ev["address"])))
     sh["A1"] = 1
     assert "B1" not in visits
     assert sh["B1"].value == 99
@@ -276,7 +277,7 @@ def test_deleting_formula_cell_drops_deps():
     sh["B1"] = "=A1 + 5"
     del sh["B1"]
     visits = []
-    sh.on("cell:recalc", lambda addr, old, new: visits.append(addr))
+    sh.on("cell:recalc", lambda **ev: visits.append(to_a1(*ev["address"])))
     sh["A1"] = 99
     assert visits == []
 
@@ -466,9 +467,9 @@ def test_processing_guard_prevents_reentry_for_same_cell():
     wb = Workbook()
     sh = wb.add_sheet("S")
     counter = {"n": 0}
-    def handler(addr, old, new):
+    def handler(**ev):
         counter["n"] += 1
-        if counter["n"] < 5 and addr == "A1":
+        if counter["n"] < 5 and ev["address"] == (0, 0):
             sh["A1"] = 42  # would re-enter the engine for the same cell
     sh.on("cell:change", handler)
     sh["A1"] = 1
@@ -491,3 +492,47 @@ def test_bare_sheet_does_not_evaluate_formulas():
     # B1's value remains None — no engine to compute it.
     assert s["B1"].value is None
     assert s["B1"].formula == "=A1 + 5"
+
+
+# --- Part 3.1: cell:recalc trigger contract --------------------------------
+
+
+def test_cell_recalc_payload_includes_trigger_cell():
+    """A recalc cascade is attributed to the (row, col) the user changed."""
+    wb, sh = make_wb()
+    sh["A1"] = 1
+    sh["B1"] = "=A1 * 2"
+    sh["C1"] = "=B1 + 1"
+    triggers = {}
+    sh.on(
+        "cell:recalc",
+        lambda **ev: triggers.__setitem__(to_a1(*ev["address"]), ev["trigger"]),
+    )
+    sh["A1"] = 10  # user change at A1 == (0, 0)
+    # Every cell recomputed in this cascade points back at A1.
+    assert triggers["B1"] == (0, 0)
+    assert triggers["C1"] == (0, 0)
+
+
+def test_cell_recalc_trigger_is_none_for_standalone_set_value():
+    """A direct _set_value with no originating user change has trigger None."""
+    s = Sheet()
+    s["A1"] = "=B1"
+    seen = []
+    s.on("cell:recalc", lambda **ev: seen.append(ev["trigger"]))
+    s._set_value("A1", 99)
+    assert seen == [None]
+
+
+def test_cell_recalc_payload_carries_value_and_formula_fields():
+    wb, sh = make_wb()
+    sh["A1"] = 1
+    sh["B1"] = "=A1 * 2"   # evaluates to 2
+    seen = []
+    sh.on("cell:recalc", lambda **ev: seen.append(ev))
+    sh["A1"] = 5           # B1 recomputes 2 -> 10
+    (ev,) = [e for e in seen if to_a1(*e["address"]) == "B1"]
+    assert ev["old_value"] == 2
+    assert ev["new_value"] == 10
+    assert ev["new_formula"] == "=A1 * 2"
+    assert ev["sheet"] is sh

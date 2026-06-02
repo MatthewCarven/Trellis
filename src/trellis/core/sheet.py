@@ -5,9 +5,14 @@ stored as empty cells — reads return a fresh empty ``Cell`` without persisting
 it, so iterating a sheet only walks cells that have actually been written.
 
 Sheets are :class:`~trellis.core.events.Emitter` s. Every mutation that goes
-through the public API emits ``"cell:change"`` with ``addr``, ``old``, ``new``.
-Delete of an existing cell also emits, with ``new`` set to an empty ``Cell``.
-Delete of an absent address is silent.
+through the public API emits ``"cell:change"``. The payload is locked (see
+Part 3.1): ``sheet`` (this Sheet), ``address`` (a zero-indexed ``(row, col)``
+tuple), ``old_value``/``new_value``, ``old_formula``/``new_formula``, and the
+``old``/``new`` :class:`Cell` objects themselves. Convert the address to A1
+with ``trellis.core.address.to_a1(*address)`` at the human-facing edge.
+Delete of an existing cell also emits, with the ``new`` cell empty and
+``new_value``/``new_formula`` set to ``None``. Delete of an absent address is
+silent.
 
 Range support: ``sheet['A1:B5']`` returns a :class:`~trellis.core.range.Range`
 view. Assignment broadcasts (``sheet['A1:B5'] = 0`` fills, ``sheet['A1:A5'] =
@@ -19,6 +24,9 @@ re-trigger recalc into an infinite loop). It mutates the existing cell's
 ``value`` in place, preserving ``formula`` and ``meta``, then emits
 ``"cell:recalc"`` — a separate event that recalc subscribers ignore and that
 UI handlers wanting "any value change" can listen to alongside ``cell:change``.
+Its payload mirrors ``cell:change`` and adds ``trigger``: the ``(row, col)`` of
+the originating user change that kicked off the recalc cascade (``None`` for an
+explicit/standalone recompute).
 
 Public surface:
     sheet.get(addr)         -> Cell       (empty Cell if absent)
@@ -84,11 +92,11 @@ class Sheet(Emitter):
 
     >>> s = Sheet("Demo")
     >>> changes = []
-    >>> _ = s.on("cell:change", lambda addr, old, new: changes.append(addr))
+    >>> _ = s.on("cell:change", lambda **ev: changes.append(ev["address"]))
     >>> s["A1"] = 5
     >>> s["B2"] = "=A1*2"
     >>> changes
-    ['A1', 'B2']
+    [(0, 0), (1, 1)]
     >>> s["A3:C3"] = [10, 20, 30]    # range broadcast
     >>> [c.value for c in s["A3:C3"]]
     [10, 20, 30]
@@ -126,7 +134,17 @@ class Sheet(Emitter):
         else:
             new = Cell(value=value)
         self._cells[key] = new
-        self.emit("cell:change", addr=to_a1(*key), old=old, new=new)
+        self.emit(
+            "cell:change",
+            sheet=self,
+            address=key,
+            old_value=old.value,
+            new_value=new.value,
+            old_formula=old.formula,
+            new_formula=new.formula,
+            old=old,
+            new=new,
+        )
 
     def delete(self, addr: Address) -> None:
         """Remove the cell at ``addr`` if present.
@@ -137,11 +155,24 @@ class Sheet(Emitter):
         key = _coerce(addr)
         old = self._cells.pop(key, None)
         if old is not None:
-            self.emit("cell:change", addr=to_a1(*key), old=old, new=Cell())
+            blank = Cell()
+            self.emit(
+                "cell:change",
+                sheet=self,
+                address=key,
+                old_value=old.value,
+                new_value=None,
+                old_formula=old.formula,
+                new_formula=None,
+                old=old,
+                new=blank,
+            )
 
     # --- non-emitting write path (recalc engine use) ---------------------
 
-    def _set_value(self, addr: Address, value: Any) -> None:
+    def _set_value(
+        self, addr: Address, value: Any, *, trigger: tuple[int, int] | None = None
+    ) -> None:
         """Update ``value`` in place at ``addr``, preserving formula and meta.
 
         Used by the recalc engine to write computed results. Emits
@@ -169,7 +200,18 @@ class Sheet(Emitter):
         old = Cell(value=cell.value, formula=cell.formula)
         old.meta = dict(cell.meta)
         cell.value = value
-        self.emit("cell:recalc", addr=to_a1(*key), old=old, new=cell)
+        self.emit(
+            "cell:recalc",
+            sheet=self,
+            address=key,
+            old_value=old.value,
+            new_value=cell.value,
+            old_formula=old.formula,
+            new_formula=cell.formula,
+            old=old,
+            new=cell,
+            trigger=trigger,
+        )
 
     # --- range access ----------------------------------------------------
 

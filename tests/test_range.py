@@ -3,6 +3,7 @@
 import pytest
 
 from trellis import Cell, Range, Sheet
+from trellis.core.address import to_a1
 
 
 # --- Construction --------------------------------------------------------
@@ -230,7 +231,7 @@ def test_assign_none_broadcasts():
 def test_assign_fires_cell_change_per_cell():
     s = Sheet()
     events = []
-    s.on("cell:change", lambda addr, old, new: events.append((addr, new.value)))
+    s.on("cell:change", lambda **ev: events.append((to_a1(*ev["address"]), ev["new"].value)))
     s.range("A1:B2").assign([[1, 2], [3, 4]])
     assert events == [("A1", 1), ("B1", 2), ("A2", 3), ("B2", 4)]
 
@@ -252,7 +253,7 @@ def test_clear_emits_for_existing_cells_only():
     s["A1"] = 1
     s["B2"] = 2
     events = []
-    s.on("cell:change", lambda addr, **kw: events.append(addr))
+    s.on("cell:change", lambda **ev: events.append(to_a1(*ev["address"])))
     s.range("A1:B2").clear()
     assert sorted(events) == ["A1", "B2"]
 
