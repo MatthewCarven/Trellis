@@ -40,10 +40,10 @@ Design notes
 * **No built-in overrides.** Every function name here is new; mathpack never
   shadows a core built-in.
 
-STATUS (Part 4 #4): the 17 scalar functions plus the 3 range stats
-(``STDEV``/``VAR``/``MEDIAN``) are implemented — 20 functions total — alongside
-``NUM``, the scalar ``_num`` guard, and the range-flattening ``_collect_numerics``
-helper. Final ``setup()`` review + the two test tiers are #5-#7.
+STATUS (Part 4 #5): all 20 functions implemented and wired. ``setup()`` is the
+single registration point, driven off one source of truth (:data:`FUNCTIONS`).
+The hermetic discovery path is proven (``load_plugins`` + a fake entry point);
+the real editable-install discovery proof is #7, gate sign-off is #8.
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ import statistics
 from trellis import DIV0, NA, VALUE, FormulaError, register_function
 
 __version__ = "0.1.0"
-__all__ = ["setup", "NUM"]
+__all__ = ["setup", "NUM", "FUNCTIONS"]
 
 
 # --- mathpack's own error value ----------------------------------------
@@ -283,19 +283,38 @@ def _make_stat(name: str, fn):
 
 # --- Plugin entry point ------------------------------------------------
 
+def _registrations():
+    """Yield ``(name, impl)`` for every function this plugin provides.
+
+    Single source of truth for :func:`setup` and for the :data:`FUNCTIONS`
+    listing — the three groups (unary scalars, special-arity scalars, range
+    stats) are enumerated here and nowhere else.
+    """
+    for name, mfn in _UNARY_MATH.items():
+        yield name, _make_unary(name, mfn)
+    for name, impl in _SPECIAL.items():
+        yield name, impl
+    for name, sfn in _STATS.items():
+        yield name, _make_stat(name, sfn)
+
+
+#: Every function name mathpack registers, sorted. Public so callers/tests can
+#: introspect the pack without invoking it (e.g. to assert no built-in clashes).
+FUNCTIONS = tuple(sorted(set(_UNARY_MATH) | set(_SPECIAL) | set(_STATS)))
+
+
 def setup() -> None:
     """Register all mathpack functions with the Trellis formula engine.
 
-    Called automatically once at ``import trellis`` time via the
-    ``trellis.plugins`` entry point. Safe to call again manually (each call
-    re-registers the same names); useful for the hermetic test tier.
+    This is the plugin's entry point: ``import trellis`` discovers it via the
+    ``trellis.plugins`` group (``mathpack = "trellis_mathpack:setup"`` in
+    ``pyproject.toml``) and calls it once, with no arguments. Importing this
+    module alone registers nothing — registration happens here and only here,
+    which is what the editable-install discovery test (#7) verifies.
 
-    NOTE (Part 4 #4): registers all 20 functions — 17 scalar + 3 range stats.
+    Idempotent: calling it again simply re-registers the same names (handy for
+    the hermetic test tier, which drives it directly).
     """
-    for name, mfn in _UNARY_MATH.items():
-        register_function(name)(_make_unary(name, mfn))
-    for name, impl in _SPECIAL.items():
+    for name, impl in _registrations():
         register_function(name)(impl)
-    for name, sfn in _STATS.items():
-        register_function(name)(_make_stat(name, sfn))
     return None

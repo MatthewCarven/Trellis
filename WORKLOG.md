@@ -4,6 +4,30 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-05 — Session 27: Part 4 #5 — finalise `setup()` + hermetic discovery test
+
+**What got built** (`packages/trellis-mathpack/`)
+- **Single source of truth for registration.** Added `_registrations()` (yields `(name, impl)` for all three groups) and made `setup()` a one-liner loop over it. The three group dicts (`_UNARY_MATH`/`_SPECIAL`/`_STATS`) are now enumerated in exactly one place.
+- **Public `FUNCTIONS` tuple** — sorted names of all 20 functions, exported in `__all__`. Lets callers/tests introspect the pack without invoking it (e.g. assert no built-in clashes, or generate the README table).
+- **`setup()` docstring tightened** to state the contract plainly: discovered via the `trellis.plugins` entry point, called once at `import trellis`, **import alone registers nothing** (registration happens only in `setup()`), idempotent.
+- **Real hermetic discovery tests** (`tests/test_discovery.py`, replacing the placeholder): uses the same duck-typed `FakeEntryPoint` pattern as core's `tests/test_plugin_discovery.py` to drive `load_plugins([...])` — proving the wiring end-to-end without an install. Covers: `FUNCTIONS` matches exactly what `setup()` registers (and is length 20); **import-alone-registers-nothing**; `load_plugins([FakeEntryPoint("mathpack", setup)])` returns `["mathpack"]` and makes `=COSH(0)` evaluate to 1.0; and a **broken sibling plugin** warns-and-skips while mathpack still loads.
+
+**Why this matters for the gate**
+- #5 was meant to be a confirm-and-tidy, and it was — no behaviour change to the functions. But the hermetic discovery test now proves the *contract* the Tier-2 (#7) editable-install proof relies on: that `import` is inert and `setup()` is the sole registrar. If #7 ever fails, this test localises whether the bug is in the wiring (here) or the packaging/metadata (there).
+
+**Verified**
+- mathpack suite: **32 passed** (26 in `test_mathpack.py` + 6 in `test_discovery.py`).
+- `FUNCTIONS` == the 20 registered names; **0** collisions with the 24 built-ins.
+- Core suite still **748**.
+
+**Status**
+- Part 4 table: #1–#5 done. The package is feature-complete and its wiring is proven hermetically. Remaining are the verification milestones: **#6** Tier-1 sign-off (effectively already green — the per-function + discovery tests all pass), **#7** the Tier-2 editable-install discovery proof, **#8** gate sign-off.
+
+**Next pick-up**
+- **Part 4 #7 is the real remaining work** (#6 is essentially done): script the editable-install discovery proof. Per the design's open question and the mount quirks already logged, this needs an **off-mount venv** — `pip install -e .` (core) + `pip install -e packages/trellis-mathpack` into a venv under `/tmp`, then a fresh `python -c "import trellis; ...=COSH(0)..."` with NO manual setup() call, confirming auto-discovery. Then #8 signs off and clears the first GitHub push — after which the TUI (`trellis-tui`) becomes the next milestone.
+
+---
+
 ## 2026-06-05 — Session 26: Part 4 #4 — mathpack range stats + `_collect_numerics`
 
 **What got built** (`packages/trellis-mathpack/src/trellis_mathpack/__init__.py`)

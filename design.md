@@ -586,7 +586,7 @@ All names are NEW — none collide with the 24 built-ins (`SUM AVERAGE MIN MAX C
 | #2 | Scaffold the package (pyproject, src/ layout, README skeleton) | **DONE** (Session 24) |
 | #3 | Scalar functions (trig, hyperbolic, powers/logs, misc) + `NUM` + `_num` helper | **DONE** (Session 25) |
 | #4 | Range-aware stats (`STDEV`/`VAR`/`MEDIAN`) + `_collect_numerics` | **DONE** (Session 26) |
-| #5 | `setup()` + entry-point wiring | Implement |
+| #5 | `setup()` + entry-point wiring | **DONE** (Session 27) |
 | #6 | Tier-1 hermetic tests (per-fn + error paths) | Verify |
 | #7 | Tier-2 editable-install discovery proof + finish README | Verify |
 | #8 | Confirm gate cleared; WORKLOG; note publication readiness | Verify |
