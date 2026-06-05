@@ -4,6 +4,36 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-05 — Session 25: Part 4 #3 — mathpack scalar functions + `NUM` + `_num`
+
+**What got built** (`packages/trellis-mathpack/src/trellis_mathpack/__init__.py`)
+- **17 scalar functions**, all new names, registered in `setup()`: trig `SIN COS TAN ASIN ACOS ATAN` (radians), hyperbolic `SINH COSH TANH`, powers/logs `SQRT POWER EXP LN LOG`, misc `MOD SIGN PI`. Range stats (`STDEV/VAR/MEDIAN`) are still #4.
+- **`NUM = FormulaError("#NUM!", ...)`** minted locally — the headline demo that errors are values you construct (core has no `#NUM!`). Returned for `SQRT(<0)`, `ASIN/ACOS` outside `[-1,1]`, `LN/LOG(<=0)`, invalid `LOG` base, and `POWER`/`EXP` overflow.
+- **`_num(x)` guard** — `None`→0, `int`/`float` pass through, **`bool`→`#VALUE!`** (the one deliberate deviation from core's `_coerce_scalar_number`, consistent with `ISNUMBER`/range-aggregation treating bools as non-numbers), list/str/other→`#VALUE!`, `FormulaError` passes through.
+- Implementation shape: a `_make_unary(name, fn)` factory for the 13 one-arg functions (arg-count check → `_num` → stdlib `math` call wrapped so `ValueError`/`OverflowError` → `NUM`); explicit bodies for `POWER` (2-arg), `LOG` (1-or-2-arg, base must be `>0` and `≠1`), `MOD` (2-arg; `MOD(x,0)`→core `DIV0`, *not* `NUM`; Python `%` already matches Excel's sign-of-divisor), and `PI` (0-arg).
+
+**Design calls worth remembering**
+- **`_num` reconciles a small spec/code mismatch.** design.md goal 2 says "reject bool … require int/float (else #VALUE!)" while also saying `_num` "mirrors `_coerce_scalar_number`" — but the core helper actually coerces bool→int and None→0. Resolved by treating **bool-rejection as the single intended deviation** and otherwise mirroring core (so `None`→0, empty-cell-as-zero, stays Excel-faithful: `COS(<empty>)`=1). Flagged for Matthew in case he wants strict None→`#VALUE!` instead — one-line change.
+- **`POWER` domain errors → `NUM`** (e.g. `POWER(-2,0.5)`), per design, even though Excel returns `#DIV/0!` for `0^negative`. Uses `math.pow` so those raise `ValueError` and get caught.
+- **Registration happens in `setup()`, not at import.** Functions are module-level (testable) but `register_function` is only called from `setup()`, preserving the entry-point contract (import alone must not register — the discovery test in #7 depends on this).
+- **Kept everything in `__init__.py`** (the design's "start there, split only if unwieldy" open question). 17 fns + helpers is comfortable; revisit at #4 if stats push it over.
+
+**Tests** — `tests/test_mathpack.py` rewritten from placeholder: **18 Tier-1 tests**, driven through the real `parse_formula`→`evaluate` stack (mirroring core's `test_formula_builtins.py`), with a fixture that snapshots `_REGISTRY`, calls `setup()`, restores after. Covers happy paths, every `#NUM!` domain path, `MOD→#DIV/0!`, bool→`#VALUE!` (fed via a cell, since `TRUE`/`FALSE` are literals not callables), string→`#VALUE!`, error-arg propagation, wrong-arg-count→`#N/A`, and empty-cell→0. All 18 pass.
+
+**Verified**
+- mathpack Tier-1: **18 passed**.
+- Collision smoke: `setup()` adds exactly **17** names, **zero** collide with the 24 built-ins.
+- Core suite still **748** (`PYTHONPATH=src pytest tests/ --doctest-modules src/trellis`) — mathpack doesn't touch core.
+- pytest still needs `--basetemp=/tmp/... -p no:cacheprovider` to avoid the mount temp-cleanup `RecursionError` (see [[git-commit-on-mount]] / Session 24 note).
+
+**Status**
+- Part 4 table: #1, #2 done; **#3 done**. Next: **#4** — range-aware `STDEV`/`VAR`/`MEDIAN` + a `_collect_numerics`-style flattener (lists flatten, `FormulaError` inside a range propagates, bools excluded, `<2` values → `#DIV/0!` via `statistics.StatisticsError`).
+
+**Next pick-up**
+- Part 4 #4: implement the three range stats using Python's `statistics` module; add the flatten helper; land with unit tests. Then #5 setup finalise → #6/#7 test tiers → #8 gate sign-off.
+
+---
+
 ## 2026-06-05 — Session 24: Part 4 #2 — scaffold `packages/trellis-mathpack/`
 
 **What got built** (structure only — no function code yet, by design)
@@ -524,49 +554,4 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 **Status**
 - 165 tests passing (118 carried + 47 new). No regressions.
 - Task #11 complete. Task #4 (formula engine) is now unblocked — it depended on Range.
-- Task #2 (core data model) parent: I've left it `in_progress` since the original scope was "Cell/Sheet/Workbook"; arguably it could close now that Range has landed. Either way, the core is materially feature-complete for the formula engine to build on.
-
-**Design notes worth remembering**
-- `Range` is a *transient view*, not a stored thing. Construct on demand; nothing persists in the sheet just from constructing a Range. Iteration of `cells()` surfaces empty `Cell()` placeholders for unstored positions — matches the "I'm working with this rectangle" mental model. Filter on `cell.is_empty()` if you want stored-only.
-- Broadcast of a `Cell` instance stores the *same reference* at every position. Documented as a footgun. Pass a 2D iterable of distinct cells if you need independent identities. Chaotic good — we didn't deep-copy implicitly.
-- Strings and bytes are always scalars in `assign()`, never iterables. Prevents `s["A1:E1"] = "hello"` from spreading h-e-l-l-o across the row.
-- Address-shape detection (`_is_range_addr`) lives in `sheet.py` because that's where the dispatch happens. Range itself accepts string OR tuple constructors without checking what called it.
-
-**Operational note**
-- Wrote all five files via the stage+cp+sync+verify protocol. Every file's staged sha256 matched the landed sha256 on the first attempt. No retries needed this session.
-
-**Open**
-- Task #4 (formula engine) is the obvious next chunk and would be a satisfying "feels like a real spreadsheet" milestone before the break.
-
----
-
-## 2026-05-27 — Session 5: Event system fully shipped (subtask #15, parent #3 closed)
-
-**What got built**
-- `src/trellis/__init__.py` — added `Emitter` and `Subscription` to the top-level imports and `__all__`. Updated module docstring to describe the extension surface available today (subclassing, events, Emitter mixin).
-- `README.md` — rewrote the "Extending" section. Three numbered subsections: subclass a core object, subscribe to events (live, with a runnable code example showing `wb.on("sheet:add", ...)` chained into `sheet.on("cell:change", ...)`), register into a plugin registry (still coming). Events emitted today are listed explicitly.
-
-**Verification**
-- Top-level smoke test: `from trellis import Cell, Sheet, Workbook, Emitter, Subscription` works, and a quick `wb -> sh -> on(cell:change) -> set` round-trip prints the expected events.
-- 118 tests still passing, no regressions.
-
-**Status**
-- Subtask #15 complete. Parent task #3 (event system) closed — all four subtasks (#12–#15) done.
-- Task #2 (core data model) still in progress; ranges/slicing are in follow-up #11.
-- Next obvious milestone: #11 (Range objects + multi-cell views like `sheet["A1:B5"]`), which unblocks #4 (formula engine).
-
----
-
-## 2026-05-27 — Session 4: Sheet & Workbook now emit events (subtasks #13, #14)
-
-**What got built**
-- `src/trellis/core/sheet.py` — `Sheet` now extends `Emitter`. `set()` and `delete()` emit `"cell:change"` with payload `addr` (A1 string), `old` (previous Cell, empty if none), `new` (new Cell, empty if delete). Delete of an absent address is silent. No value-equality short-circuit — setting to the same value still fires (plugins can optimize if they care).
-- `src/trellis/core/workbook.py` — `Workbook` now extends `Emitter`. Emits `"sheet:add"` (from both `add_sheet()` and `add()`), `"sheet:remove"`, and `"sheet:rename"`, all per `design.md`.
-- `tests/test_sheet.py` — appended 8 event tests covering set, delete (existing and absent), formula-string set, Cell-instance set, same-value re-write, and `listener_count`.
-- `tests/test_workbook.py` — appended 7 event tests covering all three lifecycle events, the negative "do not emit on failed add/remove" cases, and a wildcard `"*"` subscription that captures every event type in order.
-
-**Status**
-- 118 tests passing (104 carried + 14 new). No regressions.
-- Tasks #13 and #14 complete.
-- Task #15 (re-exports + README) is now unblocked — it's the last subtask under #3.
-- Once #15 lands,
+- Task #2 (core data model) paren

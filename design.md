@@ -553,7 +553,7 @@ All names are NEW — none collide with the 24 built-ins (`SUM AVERAGE MIN MAX C
 
 ## Design decisions
 
-- **Scalar type guard (shared helper).** A `_num(x)` helper returns the value if it's a real `int`/`float` (not `bool`), else `#VALUE!`. Mirrors the built-ins' `_coerce_scalar_number`. Each scalar function guards its arg(s) through it. The evaluator already short-circuits a top-level `FormulaError` arg before the function runs, so scalar functions don't re-check for errors — but aggregate functions must (see below).
+- **Scalar type guard (shared helper).** A `_num(x)` helper guards each scalar arg. **Implemented (Session 25):** it mirrors the built-ins' `_coerce_scalar_number` exactly — `None`→0 (empty-cell-as-zero), `int`/`float` pass through, list/str/other→`#VALUE!`, `FormulaError` passes through — with **one deliberate deviation: `bool`→`#VALUE!`** (core arithmetic coerces bool→int; mathpack treats bools as non-numbers, matching `ISNUMBER` and range-aggregation). The earlier wording here ("returns the value if a real int/float, else #VALUE!") would have rejected `None` too; mirroring core's `None`→0 keeps `COS(<empty cell>)`=1 Excel-faithful. If strict `None`→`#VALUE!` is preferred, it's a one-line change. The evaluator already short-circuits a top-level `FormulaError` arg before the function runs, so scalar functions don't re-check for errors — but aggregate functions must (see below).
 - **Domain errors → mathpack-local `#NUM!`.** `NUM = FormulaError("#NUM!", "...")` defined once in `__init__.py`. Returned for `SQRT(<0)`, `ASIN/ACOS` out of `[-1,1]`, `LN/LOG(<=0)`, and any `math` domain error caught from `POWER`. `MOD(x, 0)` returns core `DIV0` (Excel uses `#DIV/0!` there, not `#NUM!`).
 - **Aggregate (range) functions flatten lists.** `STDEV/VAR/MEDIAN` accept a mix of scalars and range args; a `_collect_numerics(args)` helper (mirroring the built-in of the same name) flattens lists, skips nothing silently — a `FormulaError` encountered inside a range is returned immediately (error propagation), `bool` is excluded, non-numerics → `#VALUE!`. Use Python's `statistics` module (`stdev`, `variance`, `median`) and convert its `StatisticsError` (too few points) to `#DIV/0!`.
 - **`LOG(x, base=10)`.** One or two args. Two-arg form validates base > 0 and ≠ 1 → else `#NUM!`. Keeps Excel parity.
@@ -584,7 +584,7 @@ All names are NEW — none collide with the 24 built-ins (`SUM AVERAGE MIN MAX C
 |---------|------|----------------|
 | #1 | Write this scope (Part 4) | (this doc) |
 | #2 | Scaffold the package (pyproject, src/ layout, README skeleton) | **DONE** (Session 24) |
-| #3 | Scalar functions (trig, hyperbolic, powers/logs, misc) + `NUM` + `_num` helper | Implement |
+| #3 | Scalar functions (trig, hyperbolic, powers/logs, misc) + `NUM` + `_num` helper | **DONE** (Session 25) |
 | #4 | Range-aware stats (`STDEV`/`VAR`/`MEDIAN`) + `_collect_numerics` | Implement |
 | #5 | `setup()` + entry-point wiring | Implement |
 | #6 | Tier-1 hermetic tests (per-fn + error paths) | Verify |
@@ -595,8 +595,4 @@ Each implementation task lands as a self-contained chunk with its tests, per the
 
 ## References
 
-- `docs/plugin-example.md` — "Shipping a plugin as an installable package" (the COSH/SINH worked example this package makes real) and the meta-namespacing section (`cell.meta["trellis_mathpack"]`).
-- `src/trellis/_plugins.py` — `load_plugins`, the `trellis.plugins` group, the warn-and-skip failure model.
-- `src/trellis/formula/builtins.py` — conventions to mirror (`_coerce_scalar_number`, `_collect_numerics`, arg-count errors).
-- `tests/test_plugin_discovery.py` — `FakeEntryPoint` pattern reused by the Tier-1 discovery test.
-- Auto-memory `trellis-publication-gated-on-client` — the gate this pa
+- `docs/plugin-example.md` — "Shipping a plugin as an installable package" (the COSH/SINH worked example this
