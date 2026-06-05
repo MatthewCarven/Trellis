@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trellis-mathpack"
+version = "0.1.0"
+description = "A reference math-function plugin for the Trellis spreadsheet framework."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matthew Carven", email = "matthewcarven@gmail.com" }]
+keywords = ["trellis", "spreadsheet", "plugin", "math", "functions"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+]
+# The pack's one real dependency is the core engine itself. mathpack adds
+# functions purely through Trellis's public extension surface; it uses only
+# the stdlib (`math`, `statistics`) otherwise. During pre-publication dev the
+# core is not on PyPI — install both editable locally (see README).
+dependencies = ["trellis"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+# Plugin auto-discovery. Declaring this entry point is what makes
+# `import trellis` find and run `trellis_mathpack.setup()` automatically.
+# Left key `mathpack` is the identifier surfaced by load_plugins() and in
+# warnings; right side is the `module:callable` setup reference.
+[project.entry-points."trellis.plugins"]
+mathpack = "trellis_mathpack:setup"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trellis_mathpack"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

@@ -488,3 +488,115 @@ Per the established pattern: each implementation task lands as a self-contained 
 - Auto-memory: `simplicity-over-clever-solvers` — informs the "what NOT to build" list (display formatter, undo log, viewport cache).
 - Auto-memory: `design-philosophy-open-extensibility` — informs the convention-not-enforcement choice in 3.4.
 - Auto-memory: `trellis-deadline-pressure` — informs sizing: each implementation subtask is independently shippable so the pre-break stopping point is always near.
+
+
+# Part 4: `trellis-mathpack` — the reference plugin package (publication gate)
+
+Status: **scope, written 2026-06-03 Session 23.** No package code yet — this is the plan. Decisions confirmed with Matthew: a *useful focused* function pack (~20 fns), living as a subdir of this repo, shipped as a *real companion package* (proper README + tests, installable).
+
+## Purpose
+
+Build a separate, installable Python distribution that adds ~20 math functions to Trellis purely through the public extension surface — `register_function`, the `(ctx, *args)` calling convention, `FormulaError` as a constructible value, and `entry_points` auto-discovery. Two jobs:
+
+1. **Clear the publication gate.** Per auto-memory `trellis-publication-gated-on-client`: no GitHub push until a real consumer has exercised the API. `trellis-mathpack` is that consumer. When it installs and auto-loads cleanly and its formulas evaluate, the gate is cleared.
+2. **Be the reference plugin.** A maintained example others copy when writing their own packages. `docs/plugin-example.md` already points at `trellis_mathpack` by name — this makes that real.
+
+## Design goals
+
+1. **Touch only the public surface.** Everything `mathpack` does must go through `from trellis import ...`. If it needs a core internal, that's a bug in the *core's* public surface to fix in core — exactly the kind of gap this exercise exists to find.
+2. **Mirror the built-ins' conventions** so it reads as idiomatic Trellis: reject `bool` as a number, require `int`/`float` scalars (else `#VALUE!`), flatten list (range) args for aggregate functions, propagate any `FormulaError` found inside a range.
+3. **Demonstrate minting custom error values.** Core has no `#NUM!`. `mathpack` defines its own `NUM = FormulaError("#NUM!", ...)` for domain errors (`SQRT(-1)`, `LN(0)`). This is the single best proof that "errors are values you construct," not a closed core enum.
+4. **Real package hygiene.** Own `pyproject.toml`, `src/` layout, README, full unit tests, and a discovery integration test.
+
+## Package layout
+
+```
+packages/trellis-mathpack/
+  pyproject.toml
+  README.md
+  src/
+    trellis_mathpack/
+      __init__.py          # setup() + the NUM constant + shared helpers
+      _functions.py        # the function implementations (optional split)
+  tests/
+    test_mathpack.py       # unit tests per function
+    test_discovery.py      # entry_points / setup() integration
+```
+
+`pyproject.toml` essentials:
+
+```toml
+[project]
+name = "trellis-mathpack"
+version = "0.1.0"
+dependencies = ["trellis"]            # depends on the core (core itself stays dep-free)
+
+[project.entry-points."trellis.plugins"]
+mathpack = "trellis_mathpack:setup"
+```
+
+The left key `mathpack` is the identifier surfaced by `load_plugins()` and in warnings; the right side is the `module:callable` setup reference. Matches the worked example already in `docs/plugin-example.md`.
+
+## Function set (~20)
+
+All names are NEW — none collide with the 24 built-ins (`SUM AVERAGE MIN MAX COUNT ROUND INT ABS IF IFERROR AND OR NOT CONCAT LEFT RIGHT MID LEN ISBLANK ISERROR ISNUMBER ISTEXT TRUE FALSE`).
+
+| Group | Functions | Notes |
+|-------|-----------|-------|
+| Trig (6) | `SIN COS TAN ASIN ACOS ATAN` | radians; `ASIN`/`ACOS` domain `[-1,1]` → `#NUM!` outside |
+| Hyperbolic (3) | `SINH COSH TANH` | the design's original worked example |
+| Powers / logs (5) | `SQRT POWER EXP LN LOG` | `SQRT(<0)`→`#NUM!`; `LN(<=0)`/`LOG(<=0)`→`#NUM!`; `LOG(x, [base=10])` optional 2nd arg |
+| Misc math (3) | `MOD SIGN PI` | `MOD(x,0)`→`#DIV/0!` (Excel-faithful); `PI()` zero-arg (confirmed supported) |
+| Range stats (3) | `STDEV VAR MEDIAN` | sample stats (n−1); flatten range args; `STDEV`/`VAR` need ≥2 values else `#DIV/0!` |
+
+**Possible later extensions (NOT v1):** `DEGREES RADIANS ATAN2 LOG10 CEILING FLOOR STDEVP VARP MODE PERCENTILE`. Listed so the package has an obvious growth path; out of scope for the gate.
+
+## Design decisions
+
+- **Scalar type guard (shared helper).** A `_num(x)` helper returns the value if it's a real `int`/`float` (not `bool`), else `#VALUE!`. Mirrors the built-ins' `_coerce_scalar_number`. Each scalar function guards its arg(s) through it. The evaluator already short-circuits a top-level `FormulaError` arg before the function runs, so scalar functions don't re-check for errors — but aggregate functions must (see below).
+- **Domain errors → mathpack-local `#NUM!`.** `NUM = FormulaError("#NUM!", "...")` defined once in `__init__.py`. Returned for `SQRT(<0)`, `ASIN/ACOS` out of `[-1,1]`, `LN/LOG(<=0)`, and any `math` domain error caught from `POWER`. `MOD(x, 0)` returns core `DIV0` (Excel uses `#DIV/0!` there, not `#NUM!`).
+- **Aggregate (range) functions flatten lists.** `STDEV/VAR/MEDIAN` accept a mix of scalars and range args; a `_collect_numerics(args)` helper (mirroring the built-in of the same name) flattens lists, skips nothing silently — a `FormulaError` encountered inside a range is returned immediately (error propagation), `bool` is excluded, non-numerics → `#VALUE!`. Use Python's `statistics` module (`stdev`, `variance`, `median`) and convert its `StatisticsError` (too few points) to `#DIV/0!`.
+- **`LOG(x, base=10)`.** One or two args. Two-arg form validates base > 0 and ≠ 1 → else `#NUM!`. Keeps Excel parity.
+- **No built-in overrides.** `register_function` would silently replace; the pack deliberately never does. README says so.
+- **`statistics` + `math` only.** Stdlib. The package's one real dependency is `trellis` itself.
+
+## Testing strategy (two tiers)
+
+- **Tier 1 — hermetic (runs in the normal test style).** Import `trellis_mathpack`, call `setup()` directly (or feed a `FakeEntryPoint` to `trellis.load_plugins([...])`, reusing the pattern from `tests/test_plugin_discovery.py`), then parse+evaluate formulas: `=COSH(0)` → 1.0, `=SQRT(-1)` → `#NUM!`, `=STDEV(A1:A4)` over a range, `=PI()` → 3.14159…, `=MOD(7,0)` → `#DIV/0!`. Per-function unit coverage plus the error paths. No install required; run with `PYTHONPATH=src:packages/trellis-mathpack/src`.
+- **Tier 2 — real discovery (the actual gate proof).** `pip install -e packages/trellis-mathpack` (which pulls in the core), then a *fresh interpreter* does only `import trellis; ...` and confirms `=COSH(0)` already works — i.e. `load_plugins()` auto-found the entry point at `import trellis` time with zero manual `setup()`. This is the end-to-end proof the publication gate wants. Documented as a scripted check; runnable in CI.
+
+## Rejected / deferred alternatives
+
+- **Add `#NUM!` to core.** Tempting (it's a common error), but minting it in `mathpack` is the more valuable demonstration and keeps the core enum minimal. If multiple plugins end up wanting `#NUM!`, promote it to core later — cheap, backward-compatible.
+- **Charts / pivots / a stats *engine*.** Out by core philosophy; `mathpack` is plain scalar+aggregate functions.
+- **Bundling mathpack into the core package** (as another `builtins` module). Defeats the entire point — the gate needs a *separate distribution* exercising `entry_points`, not more in-tree built-ins.
+- **Pinning a specific `trellis` version** in `dependencies`. During pre-publication dev the core isn't on PyPI; depend on `trellis` unpinned and install both editable locally. Revisit at first release.
+
+## Open questions
+
+- **Is the core `pip install`-able as-is for the Tier-2 test?** It has a `pyproject.toml` and `dependencies = []`. Confirm `pip install -e .` on the core succeeds in a clean venv before relying on it for the discovery test. (If the editable install of the core has the permission quirk noted in past WORKLOGs, the Tier-2 test may need a real venv rather than the mount.)
+- **One module or split?** Start with everything in `__init__.py`; split into `_functions.py` only if it gets unwieldy. Decide during #3.
+- **Sample vs population stats default.** Going with sample (`STDEV`/`VAR`, n−1) to match Excel's unsuffixed names; `STDEVP`/`VARP` are in the deferred list.
+
+## Implementation breakdown (subtasks of this part)
+
+| Task ID | What | Plan/Implement |
+|---------|------|----------------|
+| #1 | Write this scope (Part 4) | (this doc) |
+| #2 | Scaffold the package (pyproject, src/ layout, README skeleton) | **DONE** (Session 24) |
+| #3 | Scalar functions (trig, hyperbolic, powers/logs, misc) + `NUM` + `_num` helper | Implement |
+| #4 | Range-aware stats (`STDEV`/`VAR`/`MEDIAN`) + `_collect_numerics` | Implement |
+| #5 | `setup()` + entry-point wiring | Implement |
+| #6 | Tier-1 hermetic tests (per-fn + error paths) | Verify |
+| #7 | Tier-2 editable-install discovery proof + finish README | Verify |
+| #8 | Confirm gate cleared; WORKLOG; note publication readiness | Verify |
+
+Each implementation task lands as a self-contained chunk with its tests, per the established rhythm. #2–#5 are the build; #6–#7 are the two test tiers; #8 is the gate sign-off that unblocks the first GitHub push.
+
+## References
+
+- `docs/plugin-example.md` — "Shipping a plugin as an installable package" (the COSH/SINH worked example this package makes real) and the meta-namespacing section (`cell.meta["trellis_mathpack"]`).
+- `src/trellis/_plugins.py` — `load_plugins`, the `trellis.plugins` group, the warn-and-skip failure model.
+- `src/trellis/formula/builtins.py` — conventions to mirror (`_coerce_scalar_number`, `_collect_numerics`, arg-count errors).
+- `tests/test_plugin_discovery.py` — `FakeEntryPoint` pattern reused by the Tier-1 discovery test.
+- Auto-memory `trellis-publication-gated-on-client` — the gate this pa

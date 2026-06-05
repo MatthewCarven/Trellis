@@ -4,6 +4,53 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-05 — Session 24: Part 4 #2 — scaffold `packages/trellis-mathpack/`
+
+**What got built** (structure only — no function code yet, by design)
+- New `packages/trellis-mathpack/` subdir of the repo with the layout from design.md Part 4:
+  - `pyproject.toml` — `name = "trellis-mathpack"`, `version = "0.1.0"`, `dependencies = ["trellis"]` (unpinned, per the pre-publication decision), hatchling build over `src/trellis_mathpack`, and the load-bearing line: `[project.entry-points."trellis.plugins"]  mathpack = "trellis_mathpack:setup"`.
+  - `src/trellis_mathpack/__init__.py` — module docstring (why this package exists, how discovery works, the public-surface-only and mint-your-own-`#NUM!` design notes) + `__version__` + a **placeholder `setup()` that is a deliberate no-op** with a TODO pointing at #3–#5.
+  - `README.md` skeleton — purpose, local editable-install instructions (both core + pack), the function table, the error-behaviour summary (incl. the `MOD→#DIV/0!` exception to `#NUM!`), and the two-tier test commands.
+  - `tests/test_mathpack.py` + `tests/test_discovery.py` — placeholder tests (import + `setup()` callable + version) standing in for the Tier-1 / Tier-2 suites that land in #6/#7.
+
+**Verified**
+- `PYTHONPATH=src:packages/trellis-mathpack/src python3 -c "import trellis_mathpack; trellis_mathpack.setup()"` — imports clean, `setup()` returns `None`.
+- `import trellis` still resolves; core function count unchanged at **22 registered** (mathpack adds none yet, as intended — no collision).
+- Both placeholder tests pass (`2 passed`).
+- Core suite untouched (no edits under `src/trellis` or `tests/`; root `testpaths=["tests"]` doesn't pick up the new `packages/` dir) — remains at **748**.
+
+**Quirk worth remembering (relevant to the #7 Tier-2 open question)**
+- Running pytest with its default `basetemp`/cache *on the mount* throws `RecursionError` during temp-dir cleanup (the mount permission quirk flagged in past logs). Fix: run with `--basetemp=/tmp/... -p no:cacheprovider` (point temp off the mount). The Tier-2 editable-install discovery test should plan for a real off-mount venv/tmp for the same reason.
+
+**Status**
+- Part 4 table: #1 (scope) done, **#2 (scaffold) done**. Next: #3 scalar fns (trig/hyperbolic/powers-logs/misc) + the `NUM` constant + the `_num` helper.
+
+**Next pick-up**
+- Part 4 #3: implement the scalar functions in `__init__.py` (or split into `_functions.py` if it gets unwieldy), define `NUM = FormulaError("#NUM!", ...)`, add the `_num(x)` type guard mirroring the built-ins' `_coerce_scalar_number`, and wire them into `setup()`. Land with their unit tests.
+
+---
+
+## 2026-06-03 — Session 23: scoped Part 4 — trellis-mathpack (the publication gate)
+
+**What got built** (planning only, no package code)
+- `design.md` — appended **Part 4: `trellis-mathpack`**, a full scope for the reference plugin package. Confirmed with Matthew: useful focused pack (~20 fns), lives as `packages/trellis-mathpack/` subdir of this repo, shipped as a real installable companion package.
+- Scope covers: purpose (clears the `trellis-publication-gated-on-client` gate + becomes the reference plugin), package layout + pyproject/entry-point, the ~20-function set (trig 6, hyperbolic 3, powers/logs 5, misc 3, range stats 3), design decisions, two-tier testing, rejected/deferred alternatives, open questions, and an #1–#8 implementation table.
+
+**Design calls worth remembering**
+- **mathpack mints its own `#NUM!`.** Core has DIV0/VALUE/REF/NAME/CIRC/NA/NULL but no NUM. Rather than add it to core, the package defines `NUM = FormulaError("#NUM!")` locally for domain errors (SQRT(<0), LN(<=0), ASIN/ACOS out of range). Best single proof that "errors are values you construct." `MOD(x,0)` still uses core DIV0 (Excel-faithful).
+- **Audit confirmations baked into the scope:** range args arrive as **lists** (flatten via a `_collect_numerics`-style helper, propagate any FormulaError found inside); the evaluator short-circuits a top-level FormulaError arg before the fn runs (so scalar fns skip that check, aggregates don't); **zero-arg calls work** (`=PI()` parses+evaluates — verified live, and `test_zero_arg_function` already exists for `NOW()`).
+- **Two test tiers.** Tier 1 hermetic (call `setup()` / FakeEntryPoint + per-fn units, no install) runs in the normal style; Tier 2 (editable install + fresh-interpreter `import trellis` auto-discovery of `=COSH(0)`) is the actual gate proof. Open question flagged: confirm the core `pip install -e .` works cleanly in a venv (past editable-install permission quirk on the mount).
+- **Strictly public surface.** If mathpack needs a core internal, that's a core public-surface bug to fix — which is part of what this exercise is meant to surface.
+
+**Status**
+- Suite unchanged at 748. Part 4 is scoped (table #1 done); #2–#8 are the build/verify chunks.
+- This is the last planned milestone before Trellis can go public: when mathpack installs, auto-loads, and evaluates green, the publication gate is cleared.
+
+**Next pick-up**
+- Part 4 #2: scaffold `packages/trellis-mathpack/` (pyproject with the `trellis.plugins` entry point, src/ layout, README skeleton). Then #3 scalar fns → #4 stats → #5 setup wiring → #6/#7 the two test tiers → #8 gate sign-off.
+
+---
+
 ## 2026-06-03 — Session 22: Part 3.4 — meta-namespacing convention (task #7) — Part 3 COMPLETE
 
 **What got built** (pure docs, no code)
@@ -522,29 +569,4 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 - 118 tests passing (104 carried + 14 new). No regressions.
 - Tasks #13 and #14 complete.
 - Task #15 (re-exports + README) is now unblocked — it's the last subtask under #3.
-- Once #15 lands, parent task #3 closes itself (it's blocked by #12–#15, all of which will be done).
-
-**Notes**
-- Both core types remain importable and usable without ever calling `on()` — lazy listener storage means no overhead for users who don't subscribe.
-- `Sheet.set()` ordering is: capture old → build/store new → emit. So handlers see the new value already in place if they read `sheet[addr]` during the callback (use the `new` payload arg if you want to avoid the round-trip).
-
----
-
-## 2026-05-27 — Session 3: Emitter mixin landed (subtask #12)
-
-**What got built**
-- `src/trellis/core/events.py` — `Emitter` mixin and `Subscription` handle, matching `design.md` exactly:
-  - Lazy listener storage (instance `__dict__["_trellis_listeners"]`, only allocated on first `on()`).
-  - Synchronous handler dispatch in registration order.
-  - Wildcard `"*"` subscription — fires after specific handlers with the event name as the first positional argument.
-  - Exceptions in handlers propagate (no swallowing); first thrower stops the chain.
-  - Snapshot-before-iterate so handlers may `on`/`off` mid-emit without corrupting iteration.
-  - `Subscription` is callable, idempotent, has `.active` and `__repr__`.
-  - `listener_count(event=None)` for introspection.
-- `tests/test_events.py` — 24 tests covering subscribe/emit basics, three unsubscribe paths, registration order, wildcard semantics, exception propagation (both specific and wildcard handlers), lazy allocation invariants, empty-bucket cleanup, re-entrant emit, on/off-during-emit safety, mixin without `super().__init__`, instance isolation.
-
-- **104 tests passing (80 carried over + 24 new). No regressions.** *[Status line reconstructed by Claude in Session 12 — Edit-tool mount bug truncated the original mid-word here; see the "Bug surfaced & fixed" note in Session 12.]*
-
----
-
-> **NOTE FROM SESSION 12 (2026-05-27).** Sessions 1 and 2 of this worklog, plus the trailing status line of Session 3, were lost when the Edit tool truncated the file's tail during the Session 12 append. The cause is the known mount-bug documented in Claude's memory (`write-protocol-mount-folders`) — a procedure Claude should have applied to a 26 KB file like this one but didn't. The Session 11 worklog (which mentioned the immediate "next pick-up") and everything from Session 3 onward up to the truncation point are intact. Sessions 1 and 2 covered the project bootstrap (scaffolding, pyproject, initial Cell/Sheet/Workbook stubs) — git HEAD's tree captures the files those sessions produced, even though the narrative entries are gone. If a richer reconstruction matters, ask Matthew before improvising.
+- Once #15 lands,
