@@ -587,9 +587,9 @@ All names are NEW — none collide with the 24 built-ins (`SUM AVERAGE MIN MAX C
 | #3 | Scalar functions (trig, hyperbolic, powers/logs, misc) + `NUM` + `_num` helper | **DONE** (Session 25) |
 | #4 | Range-aware stats (`STDEV`/`VAR`/`MEDIAN`) + `_collect_numerics` | **DONE** (Session 26) |
 | #5 | `setup()` + entry-point wiring | **DONE** (Session 27) |
-| #6 | Tier-1 hermetic tests (per-fn + error paths) | Verify |
-| #7 | Tier-2 editable-install discovery proof + finish README | Verify |
-| #8 | Confirm gate cleared; WORKLOG; note publication readiness | Verify |
+| #6 | Tier-1 hermetic tests (per-fn + error paths) | **DONE** (Session 27/28, 32 tests) |
+| #7 | Tier-2 editable-install discovery proof + finish README | **DONE** (Session 28, `scripts/tier2_discovery_check.sh`) |
+| #8 | Confirm gate cleared; WORKLOG; note publication readiness | **DONE** (Session 28 — GATE CLEARED) |
 
 Each implementation task lands as a self-contained chunk with its tests, per the established rhythm. #2–#5 are the build; #6–#7 are the two test tiers; #8 is the gate sign-off that unblocks the first GitHub push.
 

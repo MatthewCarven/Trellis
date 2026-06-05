@@ -4,6 +4,31 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-05 — Session 28: Part 4 #6/#7/#8 — Tier-2 discovery proof — **PUBLICATION GATE CLEARED**
+
+**What got built**
+- **`packages/trellis-mathpack/scripts/tier2_discovery_check.sh`** — the runnable Tier-2 proof (89 lines). Resolves the repo root from its own location, builds a throwaway off-mount venv (`mktemp`), editable-installs the core then mathpack, and runs two embedded checks:
+  1. **Auto-discovery proof** — a *fresh interpreter* does only `import trellis` (never imports `trellis_mathpack`, never calls `setup()`) and confirms `=COSH(0)`→1.0, `=SQRT(-1)`→`#NUM!`, `=STDEV(1..5)`→1.58…, and that all 20 functions are registered. This is the end-to-end gate: a real `pip install` user gets the functions for free at import time.
+  2. **Negative control** — with `TRELLIS_DISABLE_PLUGIN_DISCOVERY=1`, the functions are absent and `=COSH(0)`→`#NAME?`. Proves it's genuinely the entry point doing the work, not an import side effect.
+- README "Develop / test" section finished: documents both tiers and points at the script; notes the `--ignore-requires-python` reason.
+
+**Verified (the gate itself)**
+- Ran the script clean from scratch: editable-installed `trellis 0.0.1` + `trellis-mathpack 0.1.0`, entry point `mathpack = trellis_mathpack:setup` registered under `trellis.plugins`, **both checks passed, exit 0.**
+- Tier-1: **32 mathpack tests pass**; core suite still **748**.
+- No build pollution in the tree (hatchling editable writes nothing into the source dir; no stray `*.egg-info`/`build/`).
+
+**Resolved: the design's open question.**
+- *"Is the core `pip install -e .`-able as-is?"* — **Yes.** It installed editably with no mount permission quirk (the quirk is git-index / file-delete, not pip). The only wrinkle: the sandbox is Python 3.10 while the project declares `requires-python >= 3.11`, so the install needs `--ignore-requires-python` (the code runs fine on 3.10 — the suite does; the floor is just a declared baseline). The script passes that flag with a comment; on a real 3.11+ machine it's a no-op. On the mount, the venv MUST be off-mount (`/tmp`), which `mktemp` gives by default.
+
+**Status — Part 4 COMPLETE. The publication gate ([[trellis-publication-gated-on-client]]) is CLEARED.**
+- design.md Part 4 table: #1–#8 all done. A real, separately-distributed consumer (`trellis-mathpack`) now exercises the entire public plugin surface — `register_function`, the `(ctx, *args)` convention, `FormulaError` as a constructed value (`#NUM!`), range/aggregate handling, and `entry_points` auto-discovery — installed and auto-loaded end-to-end.
+- **Publication is now unblocked.** Per the gate memory, this was the precondition for the first GitHub push. The actual push remains Matthew's call (the `Homepage` URL in core `pyproject.toml` is still commented out, and there's no time pressure on any project). Nothing has been pushed.
+
+**Next pick-up**
+- Matthew's decision: (a) do the first **GitHub publish** (uncomment Homepage, push core + mathpack), and/or (b) start the **TUI** (`trellis-tui` sister package) — the largest remaining "is this a usable spreadsheet?" chunk and the prime consumer of the Part 3 public surface. The GUI is the exciting next milestone.
+
+---
+
 ## 2026-06-05 — Session 27: Part 4 #5 — finalise `setup()` + hermetic discovery test
 
 **What got built** (`packages/trellis-mathpack/`)

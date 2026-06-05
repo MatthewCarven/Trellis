@@ -69,12 +69,21 @@ overrides a core built-in.
 
 ## Develop / test
 
+Two tiers — the second is the publication-gate proof.
+
 ```bash
-# Tier 1 — hermetic, no install needed:
+# Tier 1 — hermetic unit + discovery tests, no install needed:
 PYTHONPATH=../../src:src python -m pytest tests/
 
-# Tier 2 — real discovery (editable install in a clean venv), see test_discovery.py
+# Tier 2 — real auto-discovery: builds a throwaway venv, editable-installs the
+# core + this package, then a fresh `import trellis` proves =COSH(0) works with
+# no manual setup() call (plus a negative control with discovery disabled).
+scripts/tier2_discovery_check.sh
 ```
+
+> The script passes `--ignore-requires-python` to `pip` because the core
+> declares `requires-python >= 3.11` while some dev sandboxes run 3.10; the code
+> itself is compatible. On a 3.11+ machine the flag is a no-op.
 
 ## License
 
