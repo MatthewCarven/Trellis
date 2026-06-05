@@ -16,7 +16,7 @@ import math
 
 import pytest
 
-from trellis import Sheet
+from trellis import Sheet, Workbook
 from trellis.formula import Context, FormulaError, evaluate, parse_formula
 from trellis.formula.functions import _REGISTRY
 
@@ -37,6 +37,10 @@ def registered():
 
 def ev(src: str):
     return evaluate(parse_formula(src), Context(sheet=Sheet("T")))
+
+
+def ev_on(sheet, src: str):
+    return evaluate(parse_formula(src), Context(sheet=sheet))
 
 
 def approx(x):
@@ -182,3 +186,84 @@ def test_empty_cell_arg_is_zero():
     s = Sheet("T")
     out = evaluate(parse_formula("COS(A1)"), Context(sheet=s))
     assert out == approx(1.0)   # COS(0) == 1
+
+
+# =======================================================================
+# Range-aware statistics (Part 4 #4): STDEV / VAR / MEDIAN
+# =======================================================================
+
+def test_stats_registered():
+    from trellis.formula import registered_function_names
+
+    assert {"STDEV", "VAR", "MEDIAN"} <= set(registered_function_names())
+
+
+def test_stats_happy_over_a_range():
+    s = Sheet("T")
+    for i, v in enumerate([2, 4, 4, 4, 5, 5, 7, 9], 1):
+        s[f"A{i}"] = v
+    assert ev_on(s, "STDEV(A1:A8)") == approx(2.138089935299395)
+    assert ev_on(s, "VAR(A1:A8)") == approx(4.571428571428571)
+    assert ev_on(s, "MEDIAN(A1:A8)") == approx(4.5)
+
+
+def test_stats_mixed_scalars_and_ranges():
+    s = Sheet("T")
+    s["A1"] = 1
+    s["A2"] = 2
+    # range A1:A2 == [1, 2], plus scalars 3, 4
+    assert ev_on(s, "MEDIAN(A1:A2,3,4)") == approx(2.5)
+    assert ev_on(s, "VAR(A1:A2,3,4)") == approx(pytest.approx(1.6666666666666667))
+
+
+def test_stdev_var_need_two_points():
+    assert ev("STDEV(5)") == FormulaError("#DIV/0!")
+    assert ev("VAR(5)") == FormulaError("#DIV/0!")
+    assert ev("STDEV()") == FormulaError("#DIV/0!")
+    assert ev("VAR()") == FormulaError("#DIV/0!")
+
+
+def test_median_needs_one_point():
+    assert ev("MEDIAN(5)") == approx(5)
+    assert ev("MEDIAN(1,2)") == approx(1.5)
+    assert ev("MEDIAN()") == FormulaError("#DIV/0!")
+
+
+def test_range_skips_text_bool_and_blanks():
+    # Excel rule: STDEV/MEDIAN ignore text, logicals, and blanks inside a range.
+    s = Sheet("T")
+    s["A1"] = 2
+    s["A2"] = "x"     # text -> skipped
+    s["A3"] = 4
+    s["A4"] = True    # logical -> skipped
+    # A5 left blank -> skipped
+    assert ev_on(s, "MEDIAN(A1:A5)") == approx(3.0)
+    assert ev_on(s, "VAR(A1:A5)") == approx(2.0)  # variance of [2, 4]
+
+
+def test_scalar_non_number_in_stats_is_value_error():
+    assert ev('MEDIAN(1, "x", 3)') == FormulaError("#VALUE!")
+
+
+def test_error_in_range_propagates_through_stats():
+    # Needs a Workbook so the formula cell actually evaluates to #NUM!.
+    wb = Workbook()
+    s = wb.add_sheet("V")
+    s["A1"] = 1
+    s["A2"] = "=SQRT(-1)"   # -> #NUM!
+    assert s["A2"].value == FormulaError("#NUM!")
+    assert ev_on(s, "STDEV(A1:A2)") == FormulaError("#NUM!")
+
+
+def test_collect_numerics_helper_directly():
+    from trellis_mathpack import _collect_numerics
+
+    # error anywhere propagates
+    assert _collect_numerics([[1, FormulaError("#NUM!")]]) == FormulaError("#NUM!")
+    assert _collect_numerics([FormulaError("#REF!"), 1]) == FormulaError("#REF!")
+    # inside a range: bool / None / text skipped; numbers kept
+    assert _collect_numerics([[1, True, None, "x", 2]]) == [1, 2]
+    # scalar rules: None -> 0, bool -> VALUE, text -> VALUE
+    assert _collect_numerics([1, None, 2]) == [1, 0, 2]
+    assert _collect_numerics([1, True]) == FormulaError("#VALUE!")
+    assert _collect_numerics([1, "x"]) == FormulaError("#VALUE!")

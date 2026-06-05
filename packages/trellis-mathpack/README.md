@@ -5,11 +5,11 @@ framework. It adds ~20 spreadsheet math functions through Trellis's public
 extension surface — and serves as the worked example to copy when writing your
 own Trellis plugin package.
 
-> **Status: scalar functions done (Part 4 #3).** Packaging, entry point, and
-> the 17 scalar functions (trig, hyperbolic, powers/logs, misc) plus the `NUM`
-> error value and `_num` guard are implemented and unit-tested. Range stats
-> (`STDEV`/`VAR`/`MEDIAN`) land next (#4). See `../../design.md` →
-> *Part 4: trellis-mathpack*.
+> **Status: all 20 functions implemented (Part 4 #4).** The 17 scalar functions
+> plus the 3 range stats (`STDEV`/`VAR`/`MEDIAN`), the `NUM` error value, and the
+> `_num` / `_collect_numerics` helpers are done and unit-tested (27 tests). What
+> remains is the discovery test tiers and gate sign-off (#5-#8). See
+> `../../design.md` → *Part 4: trellis-mathpack*.
 
 ## Why this package exists
 

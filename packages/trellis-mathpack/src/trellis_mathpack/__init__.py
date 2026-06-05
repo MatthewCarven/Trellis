@@ -40,14 +40,16 @@ Design notes
 * **No built-in overrides.** Every function name here is new; mathpack never
   shadows a core built-in.
 
-STATUS (Part 4 #3): scalar functions implemented (trig 6, hyperbolic 3,
-powers/logs 5, misc 3 = 17 functions) plus ``NUM`` and ``_num``. Range stats
-(``STDEV``/``VAR``/``MEDIAN``) land in #4; final ``setup()`` review in #5.
+STATUS (Part 4 #4): the 17 scalar functions plus the 3 range stats
+(``STDEV``/``VAR``/``MEDIAN``) are implemented — 20 functions total — alongside
+``NUM``, the scalar ``_num`` guard, and the range-flattening ``_collect_numerics``
+helper. Final ``setup()`` review + the two test tiers are #5-#7.
 """
 
 from __future__ import annotations
 
 import math
+import statistics
 
 from trellis import DIV0, NA, VALUE, FormulaError, register_function
 
@@ -89,6 +91,50 @@ def _num(x):
 def _argc(name: str, expected: str, got: int) -> FormulaError:
     """Standard ``#N/A`` for a wrong argument count (mirrors core built-ins)."""
     return FormulaError(NA.code, f"{name} expected {expected} args, got {got}")
+
+
+def _collect_numerics(args):
+    """Flatten the args of a range-aware stat function to a list of numbers.
+
+    Mirrors core's ``builtins._collect_numerics`` in structure, with mathpack's
+    bool-is-not-a-number stance applied to scalars:
+
+    * A ``FormulaError`` anywhere — a scalar arg or inside a range — is returned
+      immediately (error propagation).
+    * **Inside a range** (a list arg): ``int``/``float`` are collected; ``bool``,
+      ``str``, ``None`` and anything else are silently skipped. This is the Excel
+      rule (``STDEV`` over a range ignores text, logicals, and blanks) and matches
+      core's aggregates.
+    * **As a scalar** arg: ``int``/``float`` are collected; ``None`` counts as 0
+      (empty-cell-as-zero, mirrors core); a ``bool`` or any other type is a
+      ``#VALUE!`` error. (Core counts a scalar bool as 1/0; mathpack rejects it,
+      consistent with :func:`_num` and ``ISNUMBER``.)
+
+    Returns a ``list`` of numbers, or a ``FormulaError``.
+    """
+    out = []
+    for a in args:
+        if isinstance(a, FormulaError):
+            return a
+        if isinstance(a, list):
+            for v in a:
+                if isinstance(v, FormulaError):
+                    return v
+                if isinstance(v, bool):
+                    continue  # logicals in a range are skipped (Excel rule)
+                if isinstance(v, (int, float)):
+                    out.append(v)
+                # str / None / other inside a range: silently skipped
+        else:
+            if isinstance(a, bool):
+                return VALUE  # scalar bool is not a number in mathpack
+            if isinstance(a, (int, float)):
+                out.append(a)
+            elif a is None:
+                out.append(0)  # scalar empty acts as zero
+            else:
+                return VALUE  # scalar string / unknown type
+    return out
 
 
 # --- Scalar function bodies --------------------------------------------
@@ -207,6 +253,34 @@ _SPECIAL = {
 }
 
 
+# --- Range-aware statistics --------------------------------------------
+# STDEV / VAR are sample statistics (n-1) to match Excel's unsuffixed names;
+# they need >= 2 data points (population variants STDEVP/VARP are deferred).
+# MEDIAN needs >= 1. Python's statistics module enforces those minimums by
+# raising StatisticsError, which we surface as the core #DIV/0! value.
+
+_STATS = {
+    "STDEV": statistics.stdev,      # sample standard deviation (n-1)
+    "VAR": statistics.variance,     # sample variance (n-1)
+    "MEDIAN": statistics.median,
+}
+
+
+def _make_stat(name: str, fn):
+    """Build a registered-shape ``fn(ctx, *args)`` for a range-aware stat."""
+    def impl(ctx, *args):
+        nums = _collect_numerics(args)
+        if isinstance(nums, FormulaError):
+            return nums
+        try:
+            return fn(nums)
+        except statistics.StatisticsError:
+            return DIV0  # too few data points
+    impl.__name__ = f"_{name.lower()}"
+    impl.__qualname__ = impl.__name__
+    return impl
+
+
 # --- Plugin entry point ------------------------------------------------
 
 def setup() -> None:
@@ -216,11 +290,12 @@ def setup() -> None:
     ``trellis.plugins`` entry point. Safe to call again manually (each call
     re-registers the same names); useful for the hermetic test tier.
 
-    NOTE (Part 4 #3): registers the 17 scalar functions. Range stats
-    (STDEV/VAR/MEDIAN) get added here in #4.
+    NOTE (Part 4 #4): registers all 20 functions — 17 scalar + 3 range stats.
     """
     for name, mfn in _UNARY_MATH.items():
         register_function(name)(_make_unary(name, mfn))
     for name, impl in _SPECIAL.items():
         register_function(name)(impl)
+    for name, sfn in _STATS.items():
+        register_function(name)(_make_stat(name, sfn))
     return None

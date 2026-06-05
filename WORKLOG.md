@@ -4,6 +4,34 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-05 — Session 26: Part 4 #4 — mathpack range stats + `_collect_numerics`
+
+**What got built** (`packages/trellis-mathpack/src/trellis_mathpack/__init__.py`)
+- **3 range-aware statistics**, registered in `setup()` alongside the scalars (20 functions total now): `STDEV` (sample, n−1), `VAR` (sample, n−1), `MEDIAN`. Backed by Python's `statistics` module (`stdev`/`variance`/`median`); a `_make_stat(name, fn)` factory gives them the registry shape.
+- **`_collect_numerics(args)`** — the range-flattening helper, mirroring core `builtins._collect_numerics` in structure: a `FormulaError` anywhere (scalar or inside a range) propagates immediately; **inside a range**, `int`/`float` are collected and `bool`/`str`/`None`/other are silently skipped (Excel rule — STDEV ignores text/logicals/blanks); **as a scalar**, `None`→0 and any `bool`/other non-number → `#VALUE!` (mathpack's bool-is-not-a-number stance, consistent with `_num`).
+- **Too-few-points → `#DIV/0!`.** `statistics` raises `StatisticsError` when `STDEV`/`VAR` get <2 points (or `MEDIAN` gets 0); the factory catches it and returns core `DIV0`. So `STDEV(5)`, `VAR()`, `MEDIAN()` all → `#DIV/0!`.
+
+**Design calls worth remembering**
+- **Scalar/range asymmetry is intentional and idiomatic.** Inside a range, a non-number is skipped; as a bare scalar it's `#VALUE!`. Core's aggregates have the exact same asymmetry (scalar text → VALUE, range text → skip), so mathpack matches it — with the one mathpack twist that scalar `bool` is `#VALUE!` rather than counted as 1/0.
+- **Sample stats (n−1), matching Excel's unsuffixed `STDEV`/`VAR`.** Population variants `STDEVP`/`VARP` remain deferred.
+- **Kept everything in `__init__.py`** — 20 fns + 3 helpers is still comfortable; the design's "split only if unwieldy" bar isn't met.
+
+**Tests** — `tests/test_mathpack.py` +9 (now 26 in that file, 27 incl. the discovery placeholder): stats over a range, mixed scalars+ranges, `<2`-points → `#DIV/0!`, `MEDIAN` 0/1-point, text/bool/blank skipped inside a range, scalar non-number → `#VALUE!`, error-in-range propagation (via a **`Workbook`** so the `=SQRT(-1)` cell actually recalculates to `#NUM!`), and a direct unit test of `_collect_numerics`. All pass.
+
+**Verified**
+- mathpack: **27 passed**.
+- `setup()` adds exactly **20** names, **zero** collisions with the 24 built-ins.
+- Core suite still **748** — mathpack doesn't touch core.
+- Gotcha re-confirmed: a bare `Sheet` has no recalc engine, so a formula stored in a cell isn't evaluated (`.value` stays `None`); use a `Workbook` (auto-attaches recalc) when a test needs a stored formula to compute.
+
+**Status**
+- Part 4 table: #1–#4 done. **All 20 functions implemented.** Next: **#5** — review/finalise `setup()` (it already registers all three groups; mostly a confirm-and-tidy pass) → then #6 Tier-1 sign-off, #7 Tier-2 editable-install discovery proof + README finish, #8 gate sign-off.
+
+**Next pick-up**
+- Part 4 #5: confirm `setup()` is the single clean wiring point (it is — three loops over `_UNARY_MATH`/`_SPECIAL`/`_STATS`); decide if anything should move to a `_functions.py` (current call: no). Then the real work is #7, the editable-install discovery test — which needs an off-mount venv (mount editable-install + pytest-tempdir quirks).
+
+---
+
 ## 2026-06-05 — Session 25: Part 4 #3 — mathpack scalar functions + `NUM` + `_num`
 
 **What got built** (`packages/trellis-mathpack/src/trellis_mathpack/__init__.py`)
