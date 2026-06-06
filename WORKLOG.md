@@ -17,7 +17,13 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 **Verified:** `scripts/setup-venv.sh` end-to-end in the sandbox (off-mount venv): editable installs clean, **748 passed** (741 + 7 doctests), exit 0.
 
-**Next pick-up** (unchanged): Matthew's call — first GitHub publish and/or the Part 5 trellis-tui design pass.
+**PUBLISHED (same session, later).** Trellis is now public: **https://github.com/MatthewCarven/Trellis** — all 21 commits on `main`, verified live, `origin/main` == local `37ec605`.
+- License: Matthew confirmed **keep MIT** (over Unlicense/0BSD — MIT's universality beats the Unlicense's legally-murky "public domain" for real-world openness); repo already shipped MIT everywhere, so no change needed.
+- Local prep: branch renamed `master`→`main`; `origin` + upstream tracking wired; `Homepage = "https://github.com/matthewcarven/Trellis"` uncommented in core pyproject (37ec605). Push done by Matthew from Windows (HTTPS + credential manager).
+- **New mount quirk found (worse than the lock files):** any sandbox-git command that REWRITES `.git/config` (`git remote add`; `git branch -m`'s config pass) corrupts it into a ghost state — listed by `ls` but unreadable, "bad config line 1". Hit twice. Recovery: `rm .git/config` and hand-write the full config (incl. remote/branch sections) via the /tmp staging protocol. Sandbox sessions must never let git touch config. Recorded in the [[git-commit-on-mount]] memory.
+- Noted: `.memory-backup/` is now public on GitHub — folds into the "decide its fate" task (contents are project notes, nothing sensitive, but it's odd furniture for a public repo).
+
+**Next pick-up:** the **Part 5 trellis-tui design pass** (publish is done). Also pending: Matthew may sync licenses on his other repos to MIT; `.memory-backup/` fate.
 
 ---
 
