@@ -26,15 +26,28 @@ shift by the paste offset via the public ``trellis.shift_formula``
 (``$`` pins opt out), a single-cell payload fills the whole selection,
 empty source cells clear their targets, and the whole paste is ONE
 ``sheet.batch()``.
+
+Cut + the OS bridge (Part 6 #6): cut is the pragmatic move — paste
+relocates the cells *verbatim* (no shifting, matching Excel's cut) and
+clears the not-overwritten source cells in the same batch, then the
+clipboard demotes to copy mode (re-pasting re-stamps a copy). Any sheet
+change while a cut is pending demotes it too — a stale snapshot must
+never delete cells whose content has moved on. Copy/cut mirror the TSV
+to the system clipboard (OSC 52); pastes FROM the OS arrive as the
+terminal ``Paste`` event — our own TSV bouncing back routes to the
+full-fidelity internal clipboard, anything else parses as external
+TSV/text, every field through ``commit_text`` (the typing policy:
+``=``-leading text commits as a formula verbatim, no shifting).
 """
 
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
@@ -225,6 +238,15 @@ class TrellisApp(App):
     def _mark_dirty(self, **ev: object) -> None:
         self.dirty = True
         self._quit_armed = False  # new changes re-arm the quit warning
+        clip = self.sheet_clipboard
+        if clip is not None and clip.mode == "cut":
+            # Any engine change while a cut is pending demotes it to a
+            # copy: a stale snapshot must never delete source cells
+            # whose content has changed since. (A cut-paste demotes
+            # itself through here at its own batch exit — its writes
+            # and source-deletes are already inside the batch, so the
+            # move semantics are untouched.)
+            self.sheet_clipboard = replace(clip, mode="copy")
         self._refresh_status()
 
     def _note_recalc(self, **ev) -> None:
@@ -315,10 +337,10 @@ class TrellisApp(App):
 
     # ---------------------------------------------------------- clipboard
 
-    def on_sheet_grid_copy_request(self, message: SheetGrid.CopyRequest) -> None:
-        """Snapshot the rectangle: formula text or raw value per cell,
-        plus the TSV mirror (display text) for #6's OS bridge."""
-        (r0, c0), (r1, c1) = message.rect
+    def _snapshot(self, rect, mode: str) -> Clipboard:
+        """Snapshot a rectangle: formula text or raw value per cell,
+        plus the TSV mirror (display text) for the OS bridge."""
+        (r0, c0), (r1, c1) = rect
         rows = []
         tsv_rows = []
         for row in range(r0, r1 + 1):
@@ -330,36 +352,68 @@ class TrellisApp(App):
                 tsv_row.append(_tsv_field(display(cell.value).text))
             rows.append(tuple(payload_row))
             tsv_rows.append("\t".join(tsv_row))
-        self.sheet_clipboard = Clipboard(
+        return Clipboard(
             cells=tuple(rows),
-            mode="copy",
+            mode=mode,
             source_anchor=(r0, c0),
             tsv="\n".join(tsv_rows),
         )
-        label = (
-            to_a1(r0, c0)
-            if (r0, c0) == (r1, c1)
-            else f"{to_a1(r0, c0)}:{to_a1(r1, c1)}"
+
+    @staticmethod
+    def _rect_label(rect) -> str:
+        (r0, c0), (r1, c1) = rect
+        if (r0, c0) == (r1, c1):
+            return to_a1(r0, c0)
+        return f"{to_a1(r0, c0)}:{to_a1(r1, c1)}"
+
+    def on_sheet_grid_copy_request(self, message: SheetGrid.CopyRequest) -> None:
+        clip = self._snapshot(message.rect, "copy")
+        self.sheet_clipboard = clip
+        self.copy_to_clipboard(clip.tsv)  # OS mirror out (OSC 52)
+        self._refresh_status(f"copied {self._rect_label(message.rect)}")
+
+    def on_sheet_grid_cut_request(self, message: SheetGrid.CutRequest) -> None:
+        clip = self._snapshot(message.rect, "cut")
+        self.sheet_clipboard = clip
+        self.copy_to_clipboard(clip.tsv)
+        self._refresh_status(
+            f"cut {self._rect_label(message.rect)} — paste moves it"
         )
-        self._refresh_status(f"copied {label}")
+
+    def on_sheet_grid_cancel_request(
+        self, message: SheetGrid.CancelRequest
+    ) -> None:
+        """Esc cancels a pending cut (the content stays pasteable as a
+        copy — friendlier than dropping it; deviation noted)."""
+        clip = self.sheet_clipboard
+        if clip is not None and clip.mode == "cut":
+            self.sheet_clipboard = replace(clip, mode="copy")
+            self._refresh_status("cut cancelled — clipboard keeps a copy")
 
     def on_sheet_grid_paste_request(self, message: SheetGrid.PasteRequest) -> None:
-        """Paste the clipboard into the target rect, as ONE batch.
+        self._paste_internal(message.rect)
 
-        A 1×1 payload fills the whole target (Excel's fill-on-paste),
-        each write shifted by that target's offset from the source
-        cell; a block payload anchors at the target's top-left and
-        shifts uniformly by the paste offset. Window growth for an
-        out-of-window paste rides the batch echo's rebuild-to-cover.
+    def _paste_internal(self, rect) -> None:
+        """Paste the internal clipboard into the target rect, ONE batch.
+
+        Copy mode: a 1×1 payload fills the whole target (Excel's
+        fill-on-paste), each write shifted by that target's offset from
+        the source cell; a block payload anchors at the target's
+        top-left and shifts uniformly by the paste offset. Cut mode:
+        verbatim block paste + the not-overwritten source cells cleared
+        in the same batch, then the clipboard demotes to copy. Window
+        growth for an out-of-window paste rides the batch echo's
+        rebuild-to-cover.
         """
         clip = self.sheet_clipboard
         if clip is None:
             return
-        (t0r, t0c), (t1r, t1c) = message.rect
+        (t0r, t0c), (t1r, t1c) = rect
         src = clip.cells
         sr, sc = clip.source_anchor
+        moving = clip.mode == "cut"
         with self.sheet.batch():
-            if len(src) == 1 and len(src[0]) == 1:
+            if not moving and len(src) == 1 and len(src[0]) == 1:
                 formula, value = src[0][0]
                 for row in range(t0r, t1r + 1):
                     for col in range(t0c, t1c + 1):
@@ -368,23 +422,40 @@ class TrellisApp(App):
                         )
                 extent = ((t0r, t0c), (t1r, t1c))
             else:
-                dr, dc = t0r - sr, t0c - sc  # uniform block shift
+                # Block paste. A move pastes verbatim (dr=dc=0 is
+                # shift_formula's byte-for-byte identity); a copy
+                # shifts by the paste offset.
+                dr, dc = (0, 0) if moving else (t0r - sr, t0c - sc)
+                written = set()
                 for r_off, payload_row in enumerate(src):
                     for c_off, (formula, value) in enumerate(payload_row):
-                        self._paste_cell(
-                            (t0r + r_off, t0c + c_off), formula, value, dr, dc
-                        )
+                        target = (t0r + r_off, t0c + c_off)
+                        self._paste_cell(target, formula, value, dr, dc)
+                        written.add(target)
+                if moving:
+                    for row in range(sr, sr + len(src)):
+                        for col in range(sc, sc + len(src[0])):
+                            if (row, col) not in written:
+                                self.sheet.delete((row, col))
                 extent = (
                     (t0r, t0c),
                     (t0r + len(src) - 1, t0c + len(src[0]) - 1),
                 )
-        (e0r, e0c), (e1r, e1c) = extent
-        label = (
-            to_a1(e0r, e0c)
-            if extent[0] == extent[1]
-            else f"{to_a1(e0r, e0c)}:{to_a1(e1r, e1c)}"
-        )
-        self._refresh_status(f"pasted {label}")
+        if moving:
+            # Re-pasting after a move re-stamps a copy (friendlier than
+            # Excel's one-shot cut; deviation noted in design.md). The
+            # batch exit already demoted via _mark_dirty; this also
+            # covers a move of nothing-into-nothing (empty batch).
+            clip = self.sheet_clipboard
+            if clip is not None and clip.mode == "cut":
+                self.sheet_clipboard = replace(clip, mode="copy")
+            source_rect = ((sr, sc), (sr + len(src) - 1, sc + len(src[0]) - 1))
+            self._refresh_status(
+                f"moved {self._rect_label(source_rect)}"
+                f" → {self._rect_label(extent)}"
+            )
+        else:
+            self._refresh_status(f"pasted {self._rect_label(extent)}")
 
     def _paste_cell(
         self, address: tuple[int, int], formula, value, dr: int, dc: int
@@ -403,6 +474,53 @@ class TrellisApp(App):
             self.sheet.set(address, Cell(value=value))
         else:
             self.sheet.set(address, value)
+
+    def on_paste(self, event: events.Paste) -> None:
+        """The terminal Paste event — how Ctrl+V actually arrives in
+        most terminals (it rarely reaches the app as a key), and how
+        text pasted from other apps comes in.
+
+        Our own TSV bouncing off the OS routes to the full-fidelity
+        internal clipboard (formulas shift, objects survive); anything
+        else parses as external TSV/text. While editing, the Input's
+        own paste handling consumes the event before it bubbles here.
+        """
+        bars = self.query(FormulaBar)
+        if bars and bars.first().editing:
+            return  # belt-and-suspenders: Input.stop()s its paste anyway
+        grids = self.query(SheetGrid)
+        if not grids:
+            return
+        event.stop()
+        grid = grids.first()
+        rect = grid.selection_range or grid.cursor_rect()
+        clip = self.sheet_clipboard
+        if clip is not None and event.text == clip.tsv:
+            self._paste_internal(rect)
+        else:
+            self._paste_external(event.text, rect)
+
+    def _paste_external(self, text: str, rect) -> None:
+        """Paste external TSV/text at the target's top-left, ONE batch.
+
+        Every field goes through ``commit_text`` — the typing policy:
+        ``=``-leading text commits as a formula verbatim (no shifting:
+        external text has no source anchor), values infer like typed
+        input, empty fields clear their targets.
+        """
+        lines = text.splitlines()
+        if not lines:
+            return
+        (t0r, t0c), _ = rect
+        max_cols = 1
+        with self.sheet.batch():
+            for r_off, line in enumerate(lines):
+                fields = line.split("\t")
+                max_cols = max(max_cols, len(fields))
+                for c_off, field in enumerate(fields):
+                    commit_text(self.sheet, (t0r + r_off, t0c + c_off), field)
+        extent = ((t0r, t0c), (t0r + len(lines) - 1, t0c + max_cols - 1))
+        self._refresh_status(f"pasted {self._rect_label(extent)}")
 
     # ------------------------------------------------------ edit lifecycle
 

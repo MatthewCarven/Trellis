@@ -177,6 +177,7 @@ class SheetGrid(DataTable):
         # editing; the app's default ctrl+c (help_quit) is non-priority
         # so the focused grid wins.
         Binding("ctrl+c", "request_copy", "Copy", show=False),
+        Binding("ctrl+x", "request_cut", "Cut", show=False),
         Binding("ctrl+v", "request_paste", "Paste", show=False),
     ]
 
@@ -282,7 +283,10 @@ class SheetGrid(DataTable):
             self.move_cursor(row=r1, column=c1)
 
     def action_collapse_selection(self) -> None:
-        """Esc: collapse the selection (the cursor stays put)."""
+        """Esc: collapse the selection (the cursor stays put). Always
+        announces a ``CancelRequest`` first — the app uses it to cancel
+        a pending cut (Part 6 #6) whether or not a selection is live."""
+        self.post_message(self.CancelRequest())
         if self._sel_anchor is None:
             return
         self._sel_anchor = None
@@ -538,26 +542,45 @@ class SheetGrid(DataTable):
             self.rect = rect
             super().__init__()
 
-    class PasteRequest(Message):
-        """Paste the app clipboard into ``rect`` (Ctrl+V binding path —
-        most terminals deliver Ctrl+V as a Paste *event* instead; that
-        arrives at #6)."""
+    class CutRequest(Message):
+        """Snapshot ``rect`` as a pending move (Ctrl+X) — paste relocates
+        it verbatim and clears the source (Part 6 #6)."""
 
         def __init__(self, rect) -> None:
             self.rect = rect
             super().__init__()
 
-    def _cursor_rect(self):
+    class PasteRequest(Message):
+        """Paste the app clipboard into ``rect`` (Ctrl+V binding path —
+        most terminals deliver Ctrl+V as a Paste *event*, handled by the
+        app's ``on_paste``; both funnel to the same paste)."""
+
+        def __init__(self, rect) -> None:
+            self.rect = rect
+            super().__init__()
+
+    class CancelRequest(Message):
+        """Esc in nav mode (posted before any selection collapse)."""
+
+    def cursor_rect(self):
+        """The cursor cell as a 1×1 `Rect` — the paste/copy target when
+        no selection is live (public: the app's Paste-event path uses
+        it the same way the request actions do)."""
         cursor = self.cursor_coordinate
         cell = (cursor.row, cursor.column)
         return (cell, cell)
 
     def action_request_copy(self) -> None:
         self.post_message(
-            self.CopyRequest(self.selection_range or self._cursor_rect())
+            self.CopyRequest(self.selection_range or self.cursor_rect())
+        )
+
+    def action_request_cut(self) -> None:
+        self.post_message(
+            self.CutRequest(self.selection_range or self.cursor_rect())
         )
 
     def action_request_paste(self) -> None:
         self.post_message(
-            self.PasteRequest(self.selection_range or self._cursor_rect())
+            self.PasteRequest(self.selection_range or self.cursor_rect())
         )
