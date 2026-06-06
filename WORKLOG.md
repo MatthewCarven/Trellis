@@ -51,7 +51,16 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 - **Textual gotcha found by the suite:** `Input` selects-all on focus (8.x default), so the keystroke after a seeded edit replaced the seed wholesale (`=A1*2` arrived as `A1*2`; `012` ate its zero). Fix: `select_on_focus=False`, cursor at end. Bar's cursor-mirror now also skips while editing.
 - Tests: **`test_editing.py`, 16** — pure policy (prefill fidelity incl. minted-error codes; commit paths incl. whitespace-strings, broken-formula-stores-not-raises, delete-on-empty) + Pilot flows (seeded replace-edit; int commit + cursor move + echo + dirty; leading-zero string; formula evaluate; F2 formula/`repr` prefill; unchanged-revise no-op on a bool with dirty staying False; Esc restore; Tab/Shift+Enter moves; Delete; Backspace→empty-commit deletes; nav-Enter revise; broken-formula F2 round-trip). **TUI suite 69**; core **749** unchanged.
 
-**Next pick-up:** **Part 5 #6 — CSV open/save + app chrome**: `Ctrl+S` via `sheet.to_csv` (remembered path; pathless prompt — decide bar-prompt vs modal), status line (path, dirty flag, transient `recalc ← A1` note), `Ctrl+Q` dirty warning; save clears dirty. Then **#7 README + sign-off** ships v1. Sandbox note stands (textual 8.2.7; run from `packages/trellis-tui/` with `PYTHONPATH=../../src:src`).
+**Part 5 #6 DONE (same session, later) — CSV save + chrome. v1 feature-complete.**
+- **`StatusBar`:** one line — file label, yellow `● modified` marker, last message. Messages persist until replaced (no timers — deterministic, honest). `state` tuple exposed for tests.
+- **`Ctrl+S`:** with a path → `sheet.to_csv`; pathless → **`SaveAsScreen` modal (DECIDED: modal over bar-takeover** — the cell editor's state machine stays single-purpose; also the growth point for a future Open dialog). `OSError` reports in the status line and keeps running; success clears dirty + disarms the quit warning. Saving mid-edit saves committed state and leaves the edit open.
+- **`Ctrl+Q`:** dirty → warns once ("Ctrl+Q again to quit"); any new write re-arms the warning; clean → quits immediately. Overrides `App.action_quit`.
+- **Recalc note:** the `cell:recalc` subscription renders `recalc B1 ← A1` in the status line — 3.1's `trigger` payload earning its keep as chrome.
+- **`build_app(args)`** factored out of `main()` (testable without running the UI): `--version`; existing CSV → `read_csv`; **nonexistent path → empty workbook with the path remembered + "new file — Ctrl+S creates it"** (the natural create-a-new-spreadsheet flow).
+- **`scripts/setup-venv.{sh,ps1}` updated** to also editable-install trellis-tui (+ pytest-asyncio) — they predated the TUI; the `trellis` command now lands in the venv they build.
+- Tests: **`test_chrome.py`, 15** — build_app variants (incl. missing path), save + dirty-clear, pathless modal flow, Esc cancel, save-failure-keeps-running (directory as path), save-mid-edit, quit-warn → quit, re-arm on new write, clean quit, recalc trigger note, dirty marker. **TUI suite 84**; core **749**.
+
+**Next pick-up:** **Part 5 #7 — README for real + sign-off** (TUI README full pass incl. Windows Terminal note, root README gets the terminal app, design.md sweep). Then Part 5 is COMPLETE and v1 ships.
 
 ---
 ## 2026-06-06 — Session 31: post-move pickup — roadmap rebuilt + venv setup scripts

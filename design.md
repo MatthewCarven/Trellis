@@ -724,7 +724,7 @@ One pure function `display(value) -> DisplayText(text, align, error)` (frozen da
 - ~~**Window defaults**~~ **DECIDED (#4, Session 32):** 100 rows × 26 cols minimum; grow +32 rows / +8 cols when the cursor comes within 2 of an edge; batch-rebuild threshold 256 changes; column width 10. All class attributes on `SheetGrid` — retune by subclassing, no config system. Out-of-window engine writes rebuild the window to cover them; the cursor's high-water reach survives rebuilds.
 - ~~**Float display**~~ **DECIDED (#3, Session 32):** integer form for integral floats within ±1e16, else `%.15g`; `NaN`/`Infinity` as themselves. `tests/test_render.py`'s table is the spec.
 - ~~**Revise-edit prefill (new, found in #3)**~~ **RESOLVED (#5, Session 32):** prefill from `cell.formula` when set, else full-fidelity text (`repr` for floats, `TRUE`/`FALSE` for bools, the code for error values) — never display text. Plus the **unchanged-revise rule**: an unmodified revise-edit commits nothing at all, making F2+Enter a true no-op even for values whose text form can't round-trip (bools: inference deliberately never produces them).
-- **Pathless `Ctrl+S` prompt**: in the formula bar vs a modal. Decide in #6.
+- ~~**Pathless `Ctrl+S` prompt**~~ **DECIDED (#6, Session 32):** a modal (`SaveAsScreen`), not a bar takeover — the cell editor's state machine stays single-purpose, and the modal is the natural growth point for a future Open dialog. Bonus #6 decision: `trellis missing.csv` opens an empty workbook with the path remembered (Ctrl+S creates the file) — the natural new-spreadsheet flow.
 
 ## Implementation breakdown (subtasks of this part)
 
@@ -735,7 +735,7 @@ One pure function `display(value) -> DisplayText(text, align, error)` (frozen da
 | #3 | `render.py` display policy | pure functions, table-driven unit tests; settle the float rule — **DONE** (Session 32) |
 | #4 | Read-only `SheetGrid` | window materialization (`used_range()` ∪ min, grow-on-demand), headers, cursor, formula-bar mirroring, event-driven repaint incl. `sheet:batch`; Pilot tests — **DONE** (Session 32) |
 | #5 | Editing | replace/revise edits, commit/cancel keys, typed-input inference, `Delete`, dirty flag; Pilot tests — **DONE** (Session 32) |
-| #6 | CSV open/save + app chrome | CLI-arg open, `Ctrl+S` (+ pathless prompt), status line, `Ctrl+Q` dirty warning; Pilot tests |
+| #6 | CSV open/save + app chrome | CLI-arg open, `Ctrl+S` (+ pathless prompt), status line, `Ctrl+Q` dirty warning; Pilot tests — **DONE** (Session 32) |
 | #7 | README + sign-off | TUI README (usage, key table, "frontend not plugin" note), root README status update, WORKLOG |
 
 Same rhythm as Part 4: each row lands as a self-contained chunk with its tests. #4 is the heart (the Part 3 surface, consumed); #5 makes it an editor; #6 makes it an app.
