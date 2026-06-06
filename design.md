@@ -849,4 +849,79 @@ Same rhythm as Parts 4–5: each row is a self-contained land with its tests; #4
 - Part 3 — `sheet.batch()` and the locked event payloads every paste rides.
 - Part 5 — the one-repaint-path rule, `commit_text` policy (broken formulas commit as error values), the class-attribute tuning pattern, `infer_value`'s promotion precedent.
 - `src/trellis/formula/errors.py` — `REF` already exists; off-edge shifts have their error waiting.
-- Textual docs: [Paste event](https://textual.textualize.io/api/events/#textual.events.Paste), `App.copy_to_clipboard` (OSC 52), DataTable styling.
+- Textual docs: [Paste event](https://textual.textualize.io/api/events/#textual.events.Paste), `App.copy_to_clipboard` (OSC 52), DataTable styling.\n
+# Part 7: trellis-undo — undo/redo as the second reference plugin
+
+## Purpose
+
+Undo/redo for any Trellis sheet, shipped as a companion package and wired into the TUI as Ctrl+Z / Ctrl+Y. Top of the v2 pull list after Part 6 field-verified (S35).
+
+This is the **second reference plugin**, and it proves a different extension surface than the first. Mathpack shows *global registration* (entry point → `register_function` at import). Undo shows *stateful attachment*: a live object subscribing to a sheet's events and stashing itself in `meta` — zero core changes, no entry point at all. Together they bracket the two ways to extend Trellis. The Part 3 payload lock-in was designed with this consumer in mind ("the payloads already carry everything it needs" — now cashed in).
+
+## Design goals
+
+- **The engine hands us the diff; keep it.** One recorded event = one undo step. No command pattern, no shadow model — steps hold the displaced `Cell` *objects* from the locked payload.
+- **Restore by object.** `sheet.set(addr, old_cell)` stores the instance as-is (engine-sanctioned); the recalc engine re-evaluates restored formulas and their dependents, so snapshot-stale values self-heal (verified S35: a restored `=A1*2` recomputed against moved deps, cascade included). Plugin state in `meta` survives the round-trip for free.
+- **Library first.** `UndoLog(sheet)` works from a REPL with no TUI anywhere. The TUI is just its first consumer.
+
+## Decisions confirmed up front (Matthew, 2026-06-07)
+
+1. **TUI wiring: hard dependency.** `trellis-tui` depends on `trellis-undo`; Ctrl+Z works out of the box. (Soft-import rejected: weaker default for no real decoupling win in a monorepo.)
+2. **Undo + redo.** Ctrl+Z / Ctrl+Y (+ Ctrl+Shift+Z alias). Redo clears on any new recorded write — standard editor contract.
+3. **History capped, default 1000 steps.** Constructor arg + class attribute (`CAPACITY`), `None` = unbounded — the house escape-hatch pattern. Oldest steps drop silently (`deque(maxlen=...)`).
+
+## Architecture
+
+### The package
+
+`packages/trellis-undo/` (module `trellis_undo`, `dependencies = ["trellis"]`) — **deliberately NO `trellis.plugins` entry point.** A no-arg import-time `setup()` has nothing sane to do here: there is no global registry of workbooks to attach to. The pyproject says so in a comment, mirroring the TUI's "frontend, not plugin" note. Reference value: entry points are for global registration; **events + meta are for stateful attachment.**
+
+### `UndoLog(sheet, *, capacity=1000)`
+
+- **Records** `cell:change` and `sheet:batch` — one step per event, so a TUI gesture (an edit; a paste, selection-delete, or CSV load batch) is exactly one step. `cell:recalc` is NOT recorded: derived state re-derives on restore.
+- A step is a tuple of `(address, old, new)` triples (1 per change; N for a batch), holding the payload's `Cell` objects.
+- **`undo()`**: pops a step, restores every `old` — inside ONE `sheet.batch()` when the step is multi-cell — pushes the step onto the redo stack, returns the cell count (`None` when empty). **`redo()`** mirrors (restores `new`). Empty `old` (no value, no formula) restores as `sheet.delete` — absence stays absence, storage stays tight (set-empty would be observably harmless — `used_range` filters empties, verified — but delete keeps `_cells` honest).
+- **Self-suppression:** a `_restoring` flag makes the recorder ignore the log's own writes. Any *recorded* write clears the redo stack.
+- Surface: `can_undo` / `can_redo`, `depths` (undo, redo) for save-point experiments, `clear()`, `detach()` (unsubscribe).
+
+### Attachment helpers (the meta-convention demo)
+
+- `attach(sheet, **kw) -> UndoLog` — construct, stash at `sheet.meta["undo"]` (single namespaced key, per convention), return. Idempotent: an already-attached sheet returns its existing log.
+- `detach(sheet)` — unsubscribe + remove from meta.
+- `attach_workbook(wb, **kw)` — attach to existing sheets and, via the `sheet:add` event the workbook docstring advertises for exactly this, every future one.
+
+### TUI wiring
+
+- `trellis-tui` pyproject gains the dependency; setup-venv scripts editable-install the new package.
+- The app `attach`es on mount, `detach`es on unmount. Grid-level bindings (nav-only, the clipboard-keys rationale: while editing, Ctrl+Z must not touch the sheet) post `UndoRequest` / `RedoRequest`; the app calls the log and reports: `undid 3 cells` / `redid B3` / `nothing to undo`.
+- **Dirty:** undo writes are engine writes → dirty marks honestly. Undoing back to the save point clearing dirty = open question (cheap depth-compare; decide at the TUI row).
+- **Cut interplay for free:** undo writes demote a pending cut via the existing `_mark_dirty` hook — the stale-snapshot safety holds.
+
+## Rejected / deferred
+
+- **Entry-point auto-attach** — no global workbook registry exists, and inventing one for this would be the tail wagging the dog. Explicit attach is library-first.
+- **Command-pattern undo** (recording intents, replaying inverses) — the engine already hands over exact state diffs; commands would re-derive what we're given.
+- **Coalescing/grouping** (e.g. merging keystroke bursts) — TUI commits are already gesture-grained; nothing to merge.
+- **Cross-sheet transactional undo** — logs are per-sheet; `attach_workbook` is N independent logs. The TUI is single-sheet anyway.
+
+## Open questions
+
+- Save-point dirty integration: app remembers `depths` at save; undo/redo landing back on it clears dirty. Decide at #4.
+- Does the TUI need a visible hint that history dropped past the cap? Default: no (silent, like every editor).
+
+## Implementation breakdown
+
+| # | What lands | Where |
+|---|------------|-------|
+| 1 | This design pass | design.md Part 7 |
+| 2 | Scaffold: pyproject (no entry point, with the why-comment), README skeleton, contract docstrings | packages/trellis-undo/ |
+| 3 | `UndoLog` + `attach`/`detach`/`attach_workbook`: record/suppress/undo/redo/cap, hermetic engine-only tests | trellis_undo + tests |
+| 4 | TUI wiring: dependency, grid bindings + request messages, app handlers + status, venv scripts, Pilot tests | trellis-tui |
+| 5 | READMEs (undo + TUI key table + root), design rows closed, worklog | docs |
+
+## References
+
+- Part 3 — the 3.1 payload lock-in (old/new `Cell` objects in every change; `sheet:batch` change lists) — the contract this plugin consumes.
+- Part 6 — `_mark_dirty`'s pending-cut demote (composes with undo writes unchanged).
+- `core/workbook.py` — the `sheet:add` docstring that anticipated `attach_workbook`.
+- mathpack — the *other* reference plugin: global registration via entry point, the style this one deliberately isn't.
