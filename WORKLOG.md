@@ -3,6 +3,23 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-06 — Session 30: auto-memory backup + folder rename/move prep
+
+**Context:** Matthew is about to rename/move the project folder from "Cross Tabulator Pro" to **Trellis** — most likely by moving contents into the already-mounted empty `-=Programming=-\Trellis` folder (also flattens the old double-nesting). Claude's auto-memory lives outside the folder (AppData, keyed by space ID); the files can't be lost by the move, but the folder↔memory-space *link* might not survive it.
+
+**What got done**
+- **`.memory-backup/`** created at repo root: verbatim copy of all 10 auto-memory files + `MEMORY.md` index + `RESTORE-README.md` (restore instructions for a future blank-slate session). Staged in /tmp, cp+sync, every file sha256-verified against staged copies — all OK. Committed as **49ec87b**.
+- Catch-up: **Session 29 (2026-06-05)** decided the TUI ships as `packages/trellis-tui/` (in-repo companion *frontend*, not a fork, not a plugin) and recorded it in CLAUDE.md — commit **88dd64a**. No worklog entry was written that session; this line closes the gap.
+
+**Move procedure agreed (Matthew executes in Explorer):**
+1. Disconnect the folder in Cowork first.
+2. Enable "Hidden items", move everything **including `.git`** but **excluding `.venv` and `.pytest_cache`** into `-=Programming=-\Trellis`.
+3. Reconnect Trellis in Cowork; test recall ("what's the Trellis roadmap position?"). If blank → restore per `.memory-backup/RESTORE-README.md`.
+
+**Next pick-up** (unchanged): Matthew's call — first GitHub publish and/or start `packages/trellis-tui/`. Next session expected in the renamed folder; rebuild `.venv` there if needed.
+
+---
+
 
 ## 2026-06-05 — Session 28: Part 4 #6/#7/#8 — Tier-2 discovery proof — **PUBLICATION GATE CLEARED**
 
