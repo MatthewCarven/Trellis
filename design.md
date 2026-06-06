@@ -684,7 +684,7 @@ The repaint loop — Part 3, cashed in:
 | `Ctrl+S` | save CSV (prompt for path if none) | — |
 | `Ctrl+Q` | quit (warn once if dirty) | — |
 
-Commit semantics: leading `=` → store the text as-is (the engine's formula sugar takes over); otherwise run the typed text through **value inference** (int → float → string; see the public-surface gap below) so typing `42` stores a number while `01234` stays a string — coherent with CSV load. Excel's commit-on-arrow-keys nuance in replace-edit is deferred polish.
+Commit semantics: leading `=` → store the text as-is (the engine's formula sugar takes over); otherwise run the typed text through **value inference** (int → float → string; see the public-surface gap below) so typing `42` stores a number while `01234` stays a string — coherent with CSV load. Excel's commit-on-arrow-keys nuance in replace-edit is deferred polish. Commits never block: a broken formula stores as its error value with the formula text preserved for F2 (verified engine behaviour — errors are values, no ParseError at the set boundary).
 
 ## Rendering policy (`render.py`)
 
@@ -718,12 +718,12 @@ One pure function `display(value) -> DisplayText(text, align, error)` (frozen da
 
 ## Open questions
 
-- **Nav-mode `Enter`**: Excel moves down; Sheets starts an edit. Lean: revise-edit (Down already moves; a second move-down key is wasted). Decide in #5.
-- **Empty commit**: store `""` or `sheet.delete`? Lean: delete (Excel-faithful, keeps `used_range()` tight).
+- ~~**Nav-mode `Enter`**~~ **DECIDED (#5, Session 32):** revise-edit (Sheets-style — Down already moves; a second move-down key is wasted). The grid's `enter` binding overrides DataTable's select; mouse-click selection is ignored (click ≠ edit).
+- ~~**Empty commit**~~ **DECIDED (#5, Session 32):** delete (Excel-faithful, keeps `used_range()` tight; `sheet.delete` verified tolerant of already-empty cells).
 - ~~**Textual pin style**~~ **DECIDED (#2, Session 32):** `>=8` uncapped — cap on a proven break, not preemptively; scaffold verified green on 8.2.7.
 - ~~**Window defaults**~~ **DECIDED (#4, Session 32):** 100 rows × 26 cols minimum; grow +32 rows / +8 cols when the cursor comes within 2 of an edge; batch-rebuild threshold 256 changes; column width 10. All class attributes on `SheetGrid` — retune by subclassing, no config system. Out-of-window engine writes rebuild the window to cover them; the cursor's high-water reach survives rebuilds.
 - ~~**Float display**~~ **DECIDED (#3, Session 32):** integer form for integral floats within ±1e16, else `%.15g`; `NaN`/`Infinity` as themselves. `tests/test_render.py`'s table is the spec.
-- **Revise-edit prefill (new, found in #3):** `display()` deliberately trims floats to 15g, so an F2-commit round-trip through display text could alter a stored noisy value. Lean: prefill from `cell.formula` when set, else `repr(value)`. Decide in #5.
+- ~~**Revise-edit prefill (new, found in #3)**~~ **RESOLVED (#5, Session 32):** prefill from `cell.formula` when set, else full-fidelity text (`repr` for floats, `TRUE`/`FALSE` for bools, the code for error values) — never display text. Plus the **unchanged-revise rule**: an unmodified revise-edit commits nothing at all, making F2+Enter a true no-op even for values whose text form can't round-trip (bools: inference deliberately never produces them).
 - **Pathless `Ctrl+S` prompt**: in the formula bar vs a modal. Decide in #6.
 
 ## Implementation breakdown (subtasks of this part)
@@ -734,7 +734,7 @@ One pure function `display(value) -> DisplayText(text, align, error)` (frozen da
 | #2 | Scaffold `packages/trellis-tui/` + core housekeeping | pyproject (`textual` dep, `trellis` script), src/tests skeleton, README skeleton; bump core's stale `tui`/`all` extras; **promote `_infer_value` → public** (+ tests, README line) — **DONE** (Session 32) |
 | #3 | `render.py` display policy | pure functions, table-driven unit tests; settle the float rule — **DONE** (Session 32) |
 | #4 | Read-only `SheetGrid` | window materialization (`used_range()` ∪ min, grow-on-demand), headers, cursor, formula-bar mirroring, event-driven repaint incl. `sheet:batch`; Pilot tests — **DONE** (Session 32) |
-| #5 | Editing | replace/revise edits, commit/cancel keys, typed-input inference, `Delete`, dirty flag; Pilot tests |
+| #5 | Editing | replace/revise edits, commit/cancel keys, typed-input inference, `Delete`, dirty flag; Pilot tests — **DONE** (Session 32) |
 | #6 | CSV open/save + app chrome | CLI-arg open, `Ctrl+S` (+ pathless prompt), status line, `Ctrl+Q` dirty warning; Pilot tests |
 | #7 | README + sign-off | TUI README (usage, key table, "frontend not plugin" note), root README status update, WORKLOG |
 

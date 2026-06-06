@@ -30,7 +30,9 @@ from __future__ import annotations
 from typing import Any
 
 from rich.text import Text
+from textual.binding import Binding
 from textual.coordinate import Coordinate
+from textual.message import Message
 from textual.widgets import DataTable
 
 from trellis import Sheet, to_a1
@@ -80,7 +82,13 @@ class SheetGrid(DataTable):
     REBUILD_THRESHOLD = 256
     COL_WIDTH = 10
 
-    BINDINGS = [("ctrl+home", "cursor_a1", "A1")]
+    BINDINGS = [
+        Binding("ctrl+home", "cursor_a1", "A1", show=False),
+        Binding("f2", "request_revise", "Edit"),
+        Binding("enter", "request_revise", "Edit", show=False),  # nav-Enter = revise (DECIDED #5); overrides DataTable's select binding
+        Binding("delete", "request_clear", "Clear"),
+        Binding("backspace", "request_replace_empty", "Clear+edit", show=False),
+    ]
 
     def __init__(self, sheet: Sheet, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -220,3 +228,38 @@ class SheetGrid(DataTable):
 
     def action_cursor_a1(self) -> None:
         self.move_cursor(row=0, column=0)
+
+    # ----------------------------------------------------- input -> intent
+    #
+    # The grid never writes the engine (read-only contract). It translates
+    # raw input into semantic request messages; the App executes them via
+    # editor.commit_text — the single write path.
+
+    class EditRequest(Message):
+        """Start an edit at the cursor. ``mode`` is "replace" or "revise"."""
+
+        def __init__(self, mode: str, seed: str = "") -> None:
+            self.mode = mode
+            self.seed = seed
+            super().__init__()
+
+    class ClearRequest(Message):
+        """Clear the cursor's cell (Delete)."""
+
+    def on_key(self, event) -> None:
+        # Any printable character starts a replace-edit seeded with it
+        # (Excel: typing overwrites). Navigation keys fall through to the
+        # DataTable bindings untouched.
+        if event.is_printable and event.character:
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.EditRequest("replace", event.character))
+
+    def action_request_revise(self) -> None:
+        self.post_message(self.EditRequest("revise"))
+
+    def action_request_replace_empty(self) -> None:
+        self.post_message(self.EditRequest("replace", ""))
+
+    def action_request_clear(self) -> None:
+        self.post_message(self.ClearRequest())

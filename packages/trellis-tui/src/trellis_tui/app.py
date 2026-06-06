@@ -1,8 +1,10 @@
-"""TrellisApp — the application shell (bindings, file open/save, main()).
+"""TrellisApp — the application shell (design.md Part 5; editing as of #5).
 
-Stage #4: the real layout — ``SheetGrid`` (read-only toward the engine)
-+ ``FormulaBar`` mirroring the cursor. Editing lands in #5, CSV save and
-status chrome in #6.
+The app is the coordinator: the grid translates raw input into semantic
+requests (it never writes the engine), the bar hosts the editor, and the
+app routes between them with exactly one write path —
+``editor.commit_text``. Repaints still arrive only via the engine's
+event echo. CSV save + status chrome land in #6.
 """
 
 from __future__ import annotations
@@ -10,12 +12,12 @@ from __future__ import annotations
 import sys
 
 from textual.app import App, ComposeResult
-from textual.widgets import DataTable, Footer, Header
+from textual.widgets import Footer, Header
 
-from trellis import Sheet, Workbook, read_csv
+from trellis import Sheet, Workbook, read_csv, to_a1
 
 from . import __version__
-from .editor import FormulaBar
+from .editor import CellEditor, FormulaBar, commit_text, prefill_text
 from .grid import SheetGrid
 
 
@@ -51,6 +53,11 @@ class TrellisApp(App):
         self.path = path
         #: v1 shows the workbook's first sheet (single-sheet decision).
         self.sheet: Sheet = next(iter(self.workbook.sheets()))
+        #: True once any engine write lands (cleared by save, #6).
+        self.dirty = False
+        self._edit_addr: tuple[int, int] | None = None
+        self._edit_prefill: str | None = None  # set only for revise-edits
+        self._dirty_subs: list = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -61,20 +68,85 @@ class TrellisApp(App):
     def on_mount(self) -> None:
         self.sub_title = self.path or "new workbook"
         self.query_one(FormulaBar).show_cell(self.sheet, (0, 0))
+        # Dirty tracking rides the same engine events as the repaint loop
+        # (cell:recalc excluded: derived state always follows a change).
+        self._dirty_subs = [
+            self.sheet.on("cell:change", self._mark_dirty),
+            self.sheet.on("sheet:batch", self._mark_dirty),
+        ]
 
-    def on_data_table_cell_highlighted(
-        self, event: DataTable.CellHighlighted
-    ) -> None:
+    def on_unmount(self) -> None:
+        for unsubscribe in self._dirty_subs:
+            unsubscribe()
+        self._dirty_subs = []
+
+    def _mark_dirty(self, **ev: object) -> None:
+        self.dirty = True
+
+    # ------------------------------------------------------ cursor mirror
+
+    def on_data_table_cell_highlighted(self, event) -> None:
         """Mirror the cursor's cell into the formula bar.
 
         Messages can outlive widgets (a highlight posted just before
         shutdown arrives after the bar unmounts) — query defensively.
         """
         bars = self.query(FormulaBar)
-        if bars:
+        if bars and not bars.first().editing:
             bars.first().show_cell(
                 self.sheet, (event.coordinate.row, event.coordinate.column)
             )
+
+    # ------------------------------------------------------ edit lifecycle
+
+    def on_sheet_grid_edit_request(self, message: SheetGrid.EditRequest) -> None:
+        self._start_edit(message.mode, message.seed)
+
+    def on_sheet_grid_clear_request(self, message: SheetGrid.ClearRequest) -> None:
+        grid = self.query_one(SheetGrid)
+        cursor = grid.cursor_coordinate
+        commit_text(self.sheet, (cursor.row, cursor.column), "")  # delete
+
+    def _start_edit(self, mode: str, seed: str = "") -> None:
+        if self._edit_addr is not None:
+            return
+        grid = self.query_one(SheetGrid)
+        cursor = grid.cursor_coordinate
+        address = (cursor.row, cursor.column)
+        if mode == "revise":
+            prefill = prefill_text(self.sheet[to_a1(*address)])
+            self._edit_prefill = prefill
+        else:
+            prefill = seed
+            self._edit_prefill = None
+        self._edit_addr = address
+        self.query_one(FormulaBar).start_edit(to_a1(*address), prefill)
+
+    def on_cell_editor_done(self, message: CellEditor.Done) -> None:
+        address = self._edit_addr
+        if address is None:
+            return
+        self._edit_addr = None
+        unchanged_revise = (
+            self._edit_prefill is not None and message.text == self._edit_prefill
+        )
+        self._edit_prefill = None
+
+        bar = self.query_one(FormulaBar)
+        bar.end_edit()
+        if message.commit and not unchanged_revise:
+            # The single write path. Never blocks: a broken formula
+            # commits as its error value (formula preserved for F2).
+            commit_text(self.sheet, address, message.text)
+
+        grid = self.query_one(SheetGrid)
+        grid.focus()
+        row = max(0, address[0] + message.move[0])
+        column = max(0, address[1] + message.move[1])
+        grid.move_cursor(row=row, column=column)
+        # Explicit refresh: covers Esc (no cursor move) and commits that
+        # change the cell under a stationary cursor.
+        bar.show_cell(self.sheet, (row, column))
 
 
 def main(argv: list[str] | None = None) -> int:

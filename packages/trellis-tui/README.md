@@ -6,13 +6,13 @@ The terminal frontend for [Trellis](../../README.md) — a [Textual](https://tex
 
 ## Status
 
-Read-only spreadsheet (Part 5 #4). The app boots into a live grid — an A1-anchored window over the engine sheet, growing on demand as you arrow into empty space, repainting via the engine's events (writes made by a script or plugin against the same `Workbook` appear as they happen), with a formula bar mirroring the cursor. No editing yet.
+An editable spreadsheet (Part 5 #5). A live grid over the engine — A1-anchored window, grow-on-demand, repainting via the engine's events — plus Excel-ish editing: type to replace, `F2`/`Enter` to revise, the `Enter`/`Tab` family commits and moves, `Esc` cancels, `Delete` clears. Typed input gets the engine's conservative inference (`42` is a number, `01234` stays text). Formulas commit even when broken: the error value shows in the grid and `F2` gets your text back. CSV save + status chrome land next.
 
 | Lands in | What |
 |----------|------|
 | #3 | `render.py` display policy (value → text) — **done** |
 | #4 | `SheetGrid`: the DataTable-backed grid, event-driven repaint — **done** |
-| #5 | Editing: formula bar, Excel-ish keys, typed-input inference |
+| #5 | Editing: formula bar, Excel-ish keys, typed-input inference — **done** |
 | #6 | CSV save (`Ctrl+S`), status line, dirty warning |
 | #7 | This README for real |
 
