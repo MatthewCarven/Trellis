@@ -20,7 +20,14 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 **Verified:** staged-in-/tmp + cp + sync + sha256 for both files (write protocol); `git diff` reviewed (append-only + the one-line EOF repair); 5 `# Part` headers present.
 
-**Next pick-up:** **Part 5 #2 — scaffold `packages/trellis-tui/`** (pyproject with `textual>=8` + `trellis` console script, src/tests skeleton, README skeleton) plus the two scheduled core touches: bump the stale `tui`/`all` extras and promote `_infer_value` → public with tests + README line. Then #3 render policy → #4 read-only grid.
+**Part 5 #2 SCAFFOLDED + core touches (same session, later).**
+- **`packages/trellis-tui/` scaffolded** (10 files): pyproject with `dependencies = ["trellis", "textual>=8"]`, console script `trellis = trellis_tui.app:main`, `asyncio_mode = "auto"`, and deliberately NO `trellis.plugins` entry point (frontend, not plugin — comment says so). `src/trellis_tui/`: `__init__.py` (contract docstring: engine-is-the-model, one-repaint-path; `__version__` defined BEFORE the `.app` import, which app.py imports back), `__main__.py`, `app.py` (a real boots-and-quits `TrellisApp` — holds a live `Workbook`, optional CSV arg, `--version` flag, Ctrl+Q), `grid.py`/`editor.py` (contract-docstring stubs, TODO #4/#5), `render.py` (placeholder `display()` raising NotImplementedError, locked by a test). README skeleton with a lands-in table.
+- **`_infer_value` → public `infer_value`** (the gap the design pass found): renamed in `io/csv.py` with a promoted-for-frontends docstring note, re-exported from `trellis.io` and top-level `trellis`, `__all__`s updated, root-README bullet added, 29 test references renamed, plus new contract test `test_infer_value_is_the_csv_loaders_rule` (top-level identity + leading-zero stays text).
+- **Stale extras bumped:** core `tui`/`all` now `textual>=8` (was `>=0.50`). Pin-style open question DECIDED: uncapped — cap on a proven break, not preemptively.
+
+**Verified (scaffold):** TUI suite **5 passed** (incl. two headless Pilot boots — empty workbook, and CSV-loaded with live in-app recalc `=SUM(A1:A2)`→30) on textual **8.2.7** / py3.10; core suite **749** (748 + the new contract test); end-to-end console-script proof in an off-mount venv — `pip install -e . -e packages/trellis-tui` (`--ignore-requires-python` on 3.10) → `trellis --version` prints, and a fresh interpreter drives the engine through `TrellisApp` (`=A1*2` → 42). design.md: #2 row DONE, textual-pin question DECIDED.
+
+**Next pick-up:** **Part 5 #3 — `render.py` display policy** (pure functions, table-driven tests, settle the float rule), then **#4 read-only `SheetGrid`** (the heart — the Part 3 surface, consumed). Note for those sessions: the sandbox now has textual 8.2.7 + pytest-asyncio installed system-level; TUI tests run from `packages/trellis-tui/` with `PYTHONPATH=../../src:src python3 -m pytest tests --basetemp=/tmp/... -p no:cacheprovider`.
 
 ---
 ## 2026-06-06 — Session 31: post-move pickup — roadmap rebuilt + venv setup scripts

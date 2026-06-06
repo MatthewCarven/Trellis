@@ -27,11 +27,11 @@ dependencies = []
 [project.optional-dependencies]
 # The TUI ships separately so the engine can be embedded without dragging in
 # a terminal renderer.
-tui = ["textual>=0.50"]
+tui = ["textual>=8"]
 # xlsx is an optional file format. Trellis core never imports openpyxl.
 xlsx = ["openpyxl>=3.1"]
 # Convenience: install everything.
-all = ["textual>=0.50", "openpyxl>=3.1"]
+all = ["textual>=8", "openpyxl>=3.1"]
 # Developer tooling.
 dev = ["pytest>=7", "pytest-cov", "ruff"]
 

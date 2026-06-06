@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trellis-tui"
+version = "0.1.0"
+description = "The Textual-based terminal frontend for the Trellis spreadsheet framework."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matthew Carven", email = "matthewcarven@gmail.com" }]
+keywords = ["trellis", "spreadsheet", "tui", "terminal", "textual"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+]
+# This is a FRONTEND, not a plugin: it depends on the core and drives it from
+# the outside through the public API only. Note there is deliberately NO
+# [project.entry-points."trellis.plugins"] section here — core never learns
+# this package exists ("library first, app second", design.md Part 5).
+# The textual dependency lives HERE so the core engine stays dependency-free.
+dependencies = ["trellis", "textual>=8"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-asyncio>=0.23"]
+
+# The TUI owns the human-facing command; the core is import-only and has no
+# CLI. Reversible pre-publish if the core ever wants the name (design.md
+# Part 5, Design decisions).
+[project.scripts]
+trellis = "trellis_tui.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trellis_tui"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+asyncio_mode = "auto"

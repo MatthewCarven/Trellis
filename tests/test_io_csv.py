@@ -13,94 +13,94 @@ from trellis import (
     Workbook,
     read_csv,
 )
-from trellis.io.csv import _infer_value, write_csv
+from trellis.io.csv import infer_value, write_csv
 
 
 # ---------------------------------------------------------------------
-# _infer_value: the type-inference rule
+# infer_value: the type-inference rule
 # ---------------------------------------------------------------------
 
 
 class TestInferValue:
     def test_empty_is_none(self):
-        assert _infer_value("") is None
+        assert infer_value("") is None
 
     def test_int(self):
-        assert _infer_value("42") == 42
-        assert isinstance(_infer_value("42"), int)
+        assert infer_value("42") == 42
+        assert isinstance(infer_value("42"), int)
 
     def test_negative_int(self):
-        assert _infer_value("-7") == -7
+        assert infer_value("-7") == -7
 
     def test_zero(self):
-        assert _infer_value("0") == 0
+        assert infer_value("0") == 0
 
     def test_float(self):
-        assert _infer_value("3.14") == 3.14
-        assert isinstance(_infer_value("3.14"), float)
+        assert infer_value("3.14") == 3.14
+        assert isinstance(infer_value("3.14"), float)
 
     def test_negative_float(self):
-        assert _infer_value("-0.5") == -0.5
+        assert infer_value("-0.5") == -0.5
 
     def test_float_with_explicit_zero_decimal(self):
         # str(1.0) == "1.0", round-trip succeeds, parsed as float.
-        assert _infer_value("1.0") == 1.0
-        assert isinstance(_infer_value("1.0"), float)
+        assert infer_value("1.0") == 1.0
+        assert isinstance(infer_value("1.0"), float)
 
     def test_plain_string(self):
-        assert _infer_value("hello") == "hello"
+        assert infer_value("hello") == "hello"
 
     def test_leading_zero_preserved_as_string(self):
         # str(int("01234")) == "1234" != "01234" — round-trip fails, stays string.
         # This protects ZIP codes, phone numbers, ID codes.
-        assert _infer_value("01234") == "01234"
+        assert infer_value("01234") == "01234"
 
     def test_plus_sign_preserved_as_string(self):
         # str(int("+42")) == "42" != "+42" — round-trip fails.
-        assert _infer_value("+42") == "+42"
+        assert infer_value("+42") == "+42"
 
     def test_whitespace_preserved_as_string(self):
         # int(" 42 ") parses to 42, but the original has whitespace.
         # Round-trip rule keeps it as a string.
-        assert _infer_value(" 42 ") == " 42 "
+        assert infer_value(" 42 ") == " 42 "
 
     def test_scientific_notation_preserved_as_string(self):
         # float("1e5") == 100000.0; str(100000.0) == "100000.0" != "1e5".
-        assert _infer_value("1e5") == "1e5"
+        assert infer_value("1e5") == "1e5"
 
     def test_trailing_zero_in_float_preserved(self):
         # float("3.140") == 3.14; str(3.14) == "3.14" != "3.140".
         # Round-trip fails, preserve as string. (Significant figures matter.)
-        assert _infer_value("3.140") == "3.140"
+        assert infer_value("3.140") == "3.140"
 
     def test_nan_string_stays_string(self):
         # float("nan") parses, but we explicitly reject NaN.
-        result = _infer_value("nan")
+        result = infer_value("nan")
         assert isinstance(result, str)
         assert result == "nan"
 
     def test_inf_string_stays_string(self):
-        assert _infer_value("inf") == "inf"
-        assert _infer_value("-inf") == "-inf"
+        assert infer_value("inf") == "inf"
+        assert infer_value("-inf") == "-inf"
 
     def test_booleans_not_inferred(self):
         # Avoiding the TRUE/true/True ambiguity.
-        assert _infer_value("TRUE") == "TRUE"
-        assert _infer_value("true") == "true"
-        assert _infer_value("True") == "True"
-        assert _infer_value("FALSE") == "FALSE"
+        assert infer_value("TRUE") == "TRUE"
+        assert infer_value("true") == "true"
+        assert infer_value("True") == "True"
+        assert infer_value("FALSE") == "FALSE"
 
     def test_formula_text_preserved_as_string(self):
         # Critical: a leading "=" must NOT make this a formula on load.
-        assert _infer_value("=SUM(A1:A2)") == "=SUM(A1:A2)"
-        assert _infer_value("=A1+1") == "=A1+1"
+        assert infer_value("=SUM(A1:A2)") == "=SUM(A1:A2)"
+        assert infer_value("=A1+1") == "=A1+1"
 
     def test_currency_string_stays_string(self):
-        assert _infer_value("$1,234") == "$1,234"
+        assert infer_value("$1,234") == "$1,234"
 
     def test_date_string_stays_string(self):
         # No date parsing — Trellis doesn't have a date type yet.
-        assert _infer_value("2026-05-27") == "2026-05-27"
+        assert infer_value("2026-05-27") == "2026-05-27"
 
 
 # ---------------------------------------------------------------------

@@ -13,6 +13,6 @@ The common entry points are re-exported here for convenience::
 The same names are also re-exported from the top-level ``trellis`` package.
 """
 
-from .csv import read_csv, write_csv
+from .csv import infer_value, read_csv, write_csv
 
-__all__ = ["read_csv", "write_csv"]
+__all__ = ["infer_value", "read_csv", "write_csv"]

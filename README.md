@@ -86,6 +86,7 @@ Events emitted today:
 - `Workbook` — `"sheet:add"`, `"sheet:remove"`, `"sheet:rename"`.
 - Subscribe with `"*"` to receive every event from a given emitter.
 - `Sheet.used_range()` returns `((min_row, min_col), (max_row, max_col))` (zero-indexed, inclusive) over non-empty cells, or `None` for an empty sheet — what a renderer or exporter calls to find the extent it must walk.
+- `trellis.infer_value(text)` — the conservative text→value rule CSV loading uses (int → float → string; leading zeros, `+` signs, scientific notation stay strings). Public so a frontend can make typed input behave exactly like loaded data.
 
 The `Emitter` mixin (and `Subscription` handle) are re-exported from `trellis` if you want pub/sub on your own classes — it's a drop-in mixin and doesn't require `super().__init__()`.
 

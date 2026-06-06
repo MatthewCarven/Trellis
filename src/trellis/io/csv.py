@@ -39,7 +39,7 @@ PathLike = Union[str, Path]
 _INFINITES = (float("inf"), -float("inf"))
 
 
-def _infer_value(s: str) -> int | float | str | None:
+def infer_value(s: str) -> int | float | str | None:
     """Infer a Python value from a CSV cell string.
 
     Empty string -> ``None``. Otherwise try ``int``, then ``float``,
@@ -50,6 +50,11 @@ def _infer_value(s: str) -> int | float | str | None:
     ``"nan"`` almost certainly didn't mean IEEE-754 NaN).
 
     Anything that doesn't parse is returned unchanged.
+
+    Public API (promoted for the TUI, design.md Part 5): any frontend
+    that accepts typed text — a formula bar, a future web UI — should
+    run input through this same rule, so typing ``42`` behaves exactly
+    like loading ``42`` from a CSV.
     """
     if s == "":
         return None
@@ -86,7 +91,7 @@ def read_csv(
     """Load a CSV file into a Workbook.
 
     Each CSV row becomes a sheet row starting at A1. Values are inferred
-    via :func:`_infer_value` (int → float → string; empty → ``None``).
+    via :func:`infer_value` (int → float → string; empty → ``None``).
 
     Parameters
     ----------
@@ -126,7 +131,7 @@ def read_csv(
         with sheet.batch():
             for row_idx, row in enumerate(reader):
                 for col_idx, raw in enumerate(row):
-                    value = _infer_value(raw)
+                    value = infer_value(raw)
                     # Skip empty cells — they're already absent. Keeps the
                     # sparse dict sparse; ragged-right rows don't fill in
                     # phantom blanks.
@@ -223,4 +228,4 @@ def _stringify(v) -> str:
     return str(v)
 
 
-__all__ = ["read_csv", "write_csv"]
+__all__ = ["infer_value", "read_csv", "write_csv"]

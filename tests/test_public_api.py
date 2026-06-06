@@ -74,7 +74,7 @@ def test_all_promised_names_are_exported():
         # Plugin discovery
         "load_plugins",
         # File I/O
-        "read_csv",
+        "infer_value", "read_csv",
     }
     missing = expected - set(trellis.__all__)
     assert not missing, f"missing from __all__: {missing}"
@@ -85,6 +85,16 @@ def test_all_promised_names_are_exported():
 def test_version_string():
     assert isinstance(trellis.__version__, str)
     assert trellis.__version__  # non-empty
+
+
+def test_infer_value_is_the_csv_loaders_rule():
+    """Promoted in Part 5: frontends reuse the loader's inference rule
+    so typed input behaves exactly like loaded data."""
+    from trellis.io.csv import infer_value as canonical
+
+    assert trellis.infer_value is canonical
+    assert trellis.infer_value("42") == 42
+    assert trellis.infer_value("01234") == "01234"  # leading zero stays text
 
 
 # --- README "Quick taste" pattern --------------------------------------

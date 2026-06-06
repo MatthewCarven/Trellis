@@ -39,7 +39,9 @@ Extension surface available today:
     - Round-trip CSV files via ``trellis.read_csv(path)`` and
       ``sheet.to_csv(path)``. Stdlib-only, zero dependencies. Formulas
       are saved as their computed values (matching Excel's CSV export);
-      values are inferred on load (int, then float, then string).
+      values are inferred on load (int, then float, then string) via
+      ``trellis.infer_value`` — public, so frontends can make typed
+      input behave exactly like loaded data.
 """
 
 # Core data model
@@ -79,7 +81,7 @@ from ._plugins import load_plugins
 
 # File I/O — CSV ships in core (stdlib only). Other formats live behind
 # optional-dependency extras (see ``trellis.io`` for the structure).
-from .io.csv import read_csv
+from .io.csv import infer_value, read_csv
 
 __all__ = [
     # Core
@@ -112,6 +114,7 @@ __all__ = [
     # Plugin discovery
     "load_plugins",
     # File I/O
+    "infer_value",
     "read_csv",
 ]
 __version__ = "0.0.1"
