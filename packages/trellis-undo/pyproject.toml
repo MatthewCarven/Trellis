@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trellis-undo"
+version = "0.1.0"
+description = "Undo/redo for Trellis sheets — the stateful-attachment reference plugin."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matthew Carven", email = "matthewcarven@gmail.com" }]
+keywords = ["trellis", "spreadsheet", "undo", "redo", "plugin"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+]
+# This plugin extends Trellis through STATEFUL ATTACHMENT — live UndoLog
+# objects subscribing to a sheet's events and stashing themselves in
+# sheet.meta — so there is deliberately NO
+# [project.entry-points."trellis.plugins"] section: a no-argument
+# import-time setup() would have nothing sane to do (there is no global
+# registry of workbooks to attach to). Compare trellis-mathpack, the
+# GLOBAL-REGISTRATION reference plugin, which is all entry point.
+# Entry points register globals; events + meta attach state.
+# (design.md Part 7, Architecture.)
+dependencies = ["trellis"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trellis_undo"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
