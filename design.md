@@ -837,7 +837,7 @@ In most terminals (Windows Terminal included) **Ctrl+V never reaches the app** �
 | 2 | `$` references: lexer + parser predicate + `CellRef` flags; evaluator/recalc indifference proven — **DONE (S33)** | core + tests |
 | 3 | Public `shift_formula` (token-splice; `#REF!` policy resolved; identity + pin + range + off-edge table) — **DONE (S33)** | core + re-exports + README bullet + tests |
 | 4 | Selection model: Shift+arrows, shift+click, Ctrl+A, Esc, delta-paint, bar readout, Delete clears selection — **DONE (S34)** | grid.py + app/editor + tests |
-| 5 | Internal clipboard: copy + paste (shift/fill/anchor), one-batch write path, dirty/echo riding it | app.py + tests |
+| 5 | Internal clipboard: copy + paste (shift/fill/anchor), one-batch write path, dirty/echo riding it — **DONE (S34)** | app.py + grid intents + tests |
 | 6 | Cut (pragmatic move) + OS bridge: TSV mirror out, `Paste`-event in with own-TSV detection, external inference | app.py + tests |
 | 7 | READMEs (key table + features), design.md rows closed, worklog | docs |
 

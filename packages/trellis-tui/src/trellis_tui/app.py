@@ -18,11 +18,20 @@ the formula bar (the bar mirrors the cursor cell again on collapse) and
 executes selection-wide ``ClearRequest``s as ONE ``sheet.batch()`` of
 ``commit_text`` deletes — still the single write path, one event echo,
 one dirty mark.
+
+Clipboard (Part 6 #5): app-owned ``Clipboard`` snapshot (formula text
+or raw value per cell — objects, no text round-trip; plus the TSV
+mirror for #6's OS bridge). Paste is Excel-faithful: relative refs
+shift by the paste offset via the public ``trellis.shift_formula``
+(``$`` pins opt out), a single-cell payload fills the whole selection,
+empty source cells clear their targets, and the whole paste is ONE
+``sheet.batch()``.
 """
 
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.text import Text
@@ -31,17 +40,45 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, Static
 
-from trellis import Sheet, Workbook, read_csv, to_a1
+from trellis import Cell, Sheet, Workbook, read_csv, shift_formula, to_a1
 
 from . import __version__
 from .editor import CellEditor, FormulaBar, commit_text, prefill_text
 from .grid import SheetGrid
+from .render import display
 
 
 def _empty_workbook() -> Workbook:
     wb = Workbook()
     wb.add_sheet("Sheet1")
     return wb
+
+
+def _tsv_field(text: str) -> str:
+    """Flatten one display-text field for the TSV mirror (embedded tabs
+    and newlines would break the grid shape — pragmatic lossy flatten,
+    internal clipboard unaffected)."""
+    return text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+
+
+@dataclass(frozen=True)
+class Clipboard:
+    """A copied range — a snapshot, not live references (Part 6 #5).
+
+    ``cells`` is rows×cols of per-cell payloads ``(formula, value)``:
+    the formula text (with its ``=``) when the source cell had one —
+    paste re-evaluates, so the snapshotted value is along only for the
+    ride — else ``(None, raw value)`` at full fidelity (ints, floats,
+    bools, error values carry as objects; no text round-trip).
+    ``source_anchor`` is the copied rectangle's top-left; formula
+    shifting keys off it. ``mode`` is ``"copy"`` (cut lands at #6).
+    ``tsv`` is the OS mirror built at copy time (#6 pushes it out).
+    """
+
+    cells: tuple
+    mode: str
+    source_anchor: tuple[int, int]
+    tsv: str
 
 
 class StatusBar(Static):
@@ -145,6 +182,11 @@ class TrellisApp(App):
         self._edit_prefill: str | None = None  # set only for revise-edits
         self._quit_armed = False  # first dirty Ctrl+Q warns; second quits
         self._subs: list = []
+        #: The internal cells clipboard (None until the first copy).
+        #: Named around textual's own App.clipboard property (the OS
+        #: text mirror, which #6 feeds via copy_to_clipboard). Public —
+        #: the same object a REPL poking at the app would want to see.
+        self.sheet_clipboard: Clipboard | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -270,6 +312,97 @@ class TrellisApp(App):
             f" ({r1 - r0 + 1}×{c1 - c0 + 1})"
         )
         bars.first().show_range(to_a1(cursor.row, cursor.column), readout)
+
+    # ---------------------------------------------------------- clipboard
+
+    def on_sheet_grid_copy_request(self, message: SheetGrid.CopyRequest) -> None:
+        """Snapshot the rectangle: formula text or raw value per cell,
+        plus the TSV mirror (display text) for #6's OS bridge."""
+        (r0, c0), (r1, c1) = message.rect
+        rows = []
+        tsv_rows = []
+        for row in range(r0, r1 + 1):
+            payload_row = []
+            tsv_row = []
+            for col in range(c0, c1 + 1):
+                cell = self.sheet[to_a1(row, col)]
+                payload_row.append((cell.formula, cell.value))
+                tsv_row.append(_tsv_field(display(cell.value).text))
+            rows.append(tuple(payload_row))
+            tsv_rows.append("\t".join(tsv_row))
+        self.sheet_clipboard = Clipboard(
+            cells=tuple(rows),
+            mode="copy",
+            source_anchor=(r0, c0),
+            tsv="\n".join(tsv_rows),
+        )
+        label = (
+            to_a1(r0, c0)
+            if (r0, c0) == (r1, c1)
+            else f"{to_a1(r0, c0)}:{to_a1(r1, c1)}"
+        )
+        self._refresh_status(f"copied {label}")
+
+    def on_sheet_grid_paste_request(self, message: SheetGrid.PasteRequest) -> None:
+        """Paste the clipboard into the target rect, as ONE batch.
+
+        A 1×1 payload fills the whole target (Excel's fill-on-paste),
+        each write shifted by that target's offset from the source
+        cell; a block payload anchors at the target's top-left and
+        shifts uniformly by the paste offset. Window growth for an
+        out-of-window paste rides the batch echo's rebuild-to-cover.
+        """
+        clip = self.sheet_clipboard
+        if clip is None:
+            return
+        (t0r, t0c), (t1r, t1c) = message.rect
+        src = clip.cells
+        sr, sc = clip.source_anchor
+        with self.sheet.batch():
+            if len(src) == 1 and len(src[0]) == 1:
+                formula, value = src[0][0]
+                for row in range(t0r, t1r + 1):
+                    for col in range(t0c, t1c + 1):
+                        self._paste_cell(
+                            (row, col), formula, value, row - sr, col - sc
+                        )
+                extent = ((t0r, t0c), (t1r, t1c))
+            else:
+                dr, dc = t0r - sr, t0c - sc  # uniform block shift
+                for r_off, payload_row in enumerate(src):
+                    for c_off, (formula, value) in enumerate(payload_row):
+                        self._paste_cell(
+                            (t0r + r_off, t0c + c_off), formula, value, dr, dc
+                        )
+                extent = (
+                    (t0r, t0c),
+                    (t0r + len(src) - 1, t0c + len(src[0]) - 1),
+                )
+        (e0r, e0c), (e1r, e1c) = extent
+        label = (
+            to_a1(e0r, e0c)
+            if extent[0] == extent[1]
+            else f"{to_a1(e0r, e0c)}:{to_a1(e1r, e1c)}"
+        )
+        self._refresh_status(f"pasted {label}")
+
+    def _paste_cell(
+        self, address: tuple[int, int], formula, value, dr: int, dc: int
+    ) -> None:
+        """Write one pasted cell. Formulas shift (off-edge refs become
+        ``#REF!`` literals — errors-are-values, the cell still commits);
+        raw values write verbatim; empty source cells clear the target."""
+        if formula is not None:
+            self.sheet.set(address, shift_formula(formula, dr, dc))
+        elif value is None:
+            self.sheet.delete(address)
+        elif isinstance(value, str) and value.startswith("="):
+            # A literal "="-string VALUE (no formula). sheet.set's sugar
+            # would promote it to a formula — a prebuilt Cell is the
+            # engine's sanctioned verbatim path ("stored as-is").
+            self.sheet.set(address, Cell(value=value))
+        else:
+            self.sheet.set(address, value)
 
     # ------------------------------------------------------ edit lifecycle
 

@@ -17,6 +17,15 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 **NEXT: Part 6 #5 — internal clipboard** (app-owned `Clipboard(cells, mode, source_anchor, tsv)`; copy + paste with `shift_formula` per-cell offsets, fill-on-paste, one-batch writes). Then #6 cut + OS bridge, #7 docs. Selection surface #5 needs is ready: `selection_range`, `SelectionChanged`, and the one-batch ClearRequest pattern to mirror.
 
+**Part 6 #5 DONE (same session, later) — internal clipboard. Copy/paste works.**
+- **`Clipboard` snapshot, app-owned** (frozen dataclass, tuple-of-tuples cells): per-cell payload = formula text when set (paste re-evaluates; the snapshotted value just rides along), else the raw value object — bools/floats/error values at full fidelity, no text round-trip. `source_anchor` keys the shifting; `mode="copy"` (cut is #6's); `tsv` mirror (display text, tabs/newlines flattened to spaces) is built at copy time so #6 only has to push it.
+- **Intents stay grid-side, writes app-side:** Ctrl+C/Ctrl+V are GRID bindings posting `CopyRequest`/`PasteRequest` with a concrete rect (selection or cursor 1×1) — same shape as ClearRequest; the grid still never touches the engine or the clipboard. Bound on the grid deliberately: while editing, textual `Input`'s own ctrl+c/v handle text (app's default ctrl+c is non-priority, so the focused grid wins in nav mode).
+- **Paste semantics (Excel-faithful, spec'd at #1):** 1×1 payload **fills the whole selection**, each target shifted by ITS offset from the source cell; block payload anchors at the target top-left, uniform shift = paste offset. `shift_formula` does the rewriting (`$` pins hold; off-edge refs land as `=#REF!` whose value IS the REF error — the #3 error-literal work cashing in). Empty source cells **clear** their targets. Everything in ONE `sheet.batch()` — one echo, one recalc, one dirty; out-of-window pastes ride the batch echo's rebuild-to-cover for free. Status line: `copied A1:B2` / `pasted D5:E6`.
+- **Two collisions found by the suite:** textual's `App` already owns a read-only `clipboard` property (its OS-text mirror — the very thing #6 feeds via `copy_to_clipboard`), so the internal one is `app.sheet_clipboard` (70 tests failed on the name before the rename). And a literal `"="`-prefixed *string value* would get promoted to a formula by `sheet.set`'s sugar on paste — the engine's own "Cell instance stored as-is" path is the sanctioned verbatim write (regression-tested).
+- Tests: **`test_clipboard.py`, 13** — snapshot fidelity (+is-a-snapshot-not-live), TSV flatten, shift/pin/off-edge-REF, fill-on-paste, block anchor+shape-wins, empty-clears, =-string verbatim, empty-clipboard no-op, out-of-window growth; one-batch asserted twice. **TUI 115, core 816**, green.
+
+**NEXT: Part 6 #6 — cut + OS bridge** (cut = verbatim move, source cleared in the paste batch, clipboard demotes to copy after; TSV out via `copy_to_clipboard`, terminal `Paste` event in, own-TSV detection, external text through `infer_value`; TSV-fidelity open question gets its formal answer). Then #7 docs.
+
 ---
 ## 2026-06-06 — Session 33: first-run feedback — CSV `formulas=` round-trip
 

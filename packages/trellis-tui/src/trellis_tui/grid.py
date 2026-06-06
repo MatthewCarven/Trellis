@@ -172,6 +172,12 @@ class SheetGrid(DataTable):
         Binding("shift+right", "extend(0, 1)", "Extend", show=False),
         Binding("ctrl+a", "select_all", "Select all", show=False),
         Binding("escape", "collapse_selection", "Deselect", show=False),
+        # Clipboard (Part 6 #5). Bound on the grid, not the app: while
+        # the CellEditor has focus, Input's own ctrl+c/v handle text
+        # editing; the app's default ctrl+c (help_quit) is non-priority
+        # so the focused grid wins.
+        Binding("ctrl+c", "request_copy", "Copy", show=False),
+        Binding("ctrl+v", "request_paste", "Paste", show=False),
     ]
 
     def __init__(self, sheet: Sheet, **kwargs: Any) -> None:
@@ -520,3 +526,38 @@ class SheetGrid(DataTable):
 
     def action_request_clear(self) -> None:
         self.post_message(self.ClearRequest(self.selection_range))
+
+    # Clipboard intents (Part 6 #5): the rect is always concrete — the
+    # selection when one is live, else the cursor's 1×1. The app owns
+    # the clipboard and the writes; the grid stays read-only.
+
+    class CopyRequest(Message):
+        """Snapshot ``rect`` to the app clipboard (Ctrl+C)."""
+
+        def __init__(self, rect) -> None:
+            self.rect = rect
+            super().__init__()
+
+    class PasteRequest(Message):
+        """Paste the app clipboard into ``rect`` (Ctrl+V binding path —
+        most terminals deliver Ctrl+V as a Paste *event* instead; that
+        arrives at #6)."""
+
+        def __init__(self, rect) -> None:
+            self.rect = rect
+            super().__init__()
+
+    def _cursor_rect(self):
+        cursor = self.cursor_coordinate
+        cell = (cursor.row, cursor.column)
+        return (cell, cell)
+
+    def action_request_copy(self) -> None:
+        self.post_message(
+            self.CopyRequest(self.selection_range or self._cursor_rect())
+        )
+
+    def action_request_paste(self) -> None:
+        self.post_message(
+            self.PasteRequest(self.selection_range or self._cursor_rect())
+        )
