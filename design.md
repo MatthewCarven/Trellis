@@ -906,7 +906,7 @@ This is the **second reference plugin**, and it proves a different extension sur
 
 ## Open questions
 
-- ~~Save-point dirty integration: app remembers `depths` at save; undo/redo landing back on it clears dirty. Decide at #4.~~ **DECIDED at #4 (S35): not in v1.** Depth equality lies once steps drop off the cap (save at a full deque, write, redo back — same depths, different content), so the honest version needs drop-tracking. Undo writes mark dirty like any write; revisit only if the ● modified after undo-to-saved actually bothers anyone.
+- ~~Save-point dirty integration: app remembers `depths` at save; undo/redo landing back on it clears dirty. Decide at #4.~~ **DECIDED at #4 (S35): not in v1.** Depth equality lies once steps drop off the cap (save at a full deque, write, redo back — same depths, different content), so the honest version needs drop-tracking. Undo writes mark dirty like any write; revisit only if the ● modified after undo-to-saved actually bothers anyone. **Ratified by Matthew (S35): it doesn't ("edge case dont care about really") — and his versioning instinct is git on the saved CSV anyway, which the `formulas=True` round-trip already serves. Closed for good.**
 - ~~Does the TUI need a visible hint that history dropped past the cap?~~ **DECIDED (S35): no** — silent, like every editor.
 
 ## Implementation breakdown
