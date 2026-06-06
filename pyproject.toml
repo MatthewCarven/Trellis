@@ -36,7 +36,7 @@ all = ["textual>=0.50", "openpyxl>=3.1"]
 dev = ["pytest>=7", "pytest-cov", "ruff"]
 
 [project.urls]
-# Homepage = "https://github.com/matthewcarven/trellis"  # uncomment when published
+Homepage = "https://github.com/matthewcarven/Trellis"
 
 # Plugin discovery surface.
 # Third-party packages can register themselves under "trellis.plugins" and they
