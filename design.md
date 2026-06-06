@@ -821,6 +821,7 @@ In most terminals (Windows Terminal included) **Ctrl+V never reaches the app** �
 - **Fill handle / Ctrl+D fill-down** — adjacent feature, separate part; `shift_formula` is the hard half of it anyway.
 - **Mouse drag-select** — Textual's cell-click events need modifier inspection; checked at #4, included only if free. Keyboard-first is the v1 bar.
 - **Clipboard history / multi-clipboard** — plugin territory the moment the TUI grows hooks; not core, not now.
+- **Formula source in the outbound TSV mirror** — considered after the S35 field test (spreadsheets parse pasted text like typed input, so `=A1*2` would land live in OO/Excel); **declined by Matthew (S35): values-only stays** — Excel-faithful, least surprising for plain-text destinations. Revisit as an opt-in "copy formulas" gesture only if it's ever actually missed.
 
 ## Open questions
 
