@@ -746,3 +746,106 @@ Same rhythm as Part 4: each row lands as a self-contained chunk with its tests. 
 - README "Extending" + `docs/plugin-example.md` — the contrast: mathpack extends from inside, the TUI embeds from outside.
 - Textual docs: [DataTable](https://textual.textualize.io/widgets/data_table/), [testing guide](https://textual.textualize.io/guide/testing/) (Pilot).
 - CLAUDE.md "Repository layout" — the 2026-06-05 in-repo companion-package decision.
+
+
+---
+
+# Part 6: Selection + clipboard (the most-missed v1 gap)
+
+## Purpose
+
+Give the TUI the other half of spreadsheet muscle memory: select a rectangle, copy/cut it, paste it somewhere else — with formulas that *behave like Excel's* when they move. Part 5 deliberately shipped without this; it was the top of the v2 pull list and Matthew confirmed it as the next part after his first real run.
+
+Like Part 5, this part is also a deliberate probe of the engine's public surface: moving formulas around exposes whether reference *rewriting* is expressible from outside the core. (Part 5's probe found `infer_value`; this part's finding is `shift_formula` + `$` pins — see below.)
+
+## Design goals
+
+- **Excel-faithful where it counts.** Shift+arrows extend, Ctrl+C/X/V, relative refs shift on copy-paste, `$` pins them, cut-paste moves verbatim. Deviations are explicit and documented, never accidental.
+- **The grid still never writes the engine.** Selection is view state; clipboard actions route through the app to the same single write path family as editing. Every paste is ONE `sheet.batch()` — one event echo, one recalc pass, one dirty mark (Part 3's machinery keeps paying).
+- **Engine growth stays minimal and library-first.** Core learns `$` references and one public helper; it never learns what a clipboard is. A REPL user gets `trellis.shift_formula` for free; the TUI is just its first consumer.
+
+## Decisions confirmed up front (Matthew, 2026-06-06)
+
+1. **Paste semantics: Excel-faithful + `$` pins.** Copy-paste shifts relative references by the paste offset (`=A1*2` from B1 pasted at B2 → `=A2*2`); the engine gains `$A$1` / `$A1` / `A$1` absolute syntax so references can opt out of shifting. Chosen over shift-without-`$` (no way to pin a rate cell) and verbatim-paste (defies the copy-across-a-row workflow).
+2. **OS clipboard: both directions.** Copy mirrors the selection to the system clipboard as TSV (Textual `App.copy_to_clipboard`, OSC 52 — Windows Terminal supports it); paste FROM other apps arrives via the terminal `Paste` event. Paste a column out of Excel or a browser straight into Trellis.
+3. **Cut: pragmatic move.** Cut-paste pastes the cells *verbatim* (no reference shifting — matching Excel's cut) and clears the source range at paste time, all in the same batch. What v1 does NOT do: rewrite *other* formulas that pointed at the moved range (Excel's inbound-reference following) — that's a whole-sheet scan-and-rewrite, deferred until someone misses it. Documented deviation.
+
+## Engine additions
+
+### 6.A — `$` absolute references
+
+- **Lexer:** `$` joins the identifier scan (it currently lexes as an unknown character). `$A$1` arrives at the parser as one IDENT lexeme.
+- **Parser:** the cell-ref predicate grows to `(\$?)([A-Za-z]+)(\$?)(\d+)`; corner normalisation for ranges preserves per-corner flags.
+- **AST:** `CellRef` gains `col_abs: bool = False`, `row_abs: bool = False`. Frozen-dataclass-compatible (defaulted fields; existing constructions, equality, and hashing for plain refs are untouched).
+- **Evaluator + recalc: indifferent by design.** `=$A$1` evaluates exactly like `=A1`; the dependency graph keys on `(row, col)`, so pinned and unpinned refs to the same cell are automatically the same dependency. The flags exist *only* for rewriting.
+- **`trellis.core.address` stays `$`-free.** `to_a1` is unchanged; `$`-knowledge lives in the lexer/parser and the shift helper. Smallest possible surface.
+- Storage already round-trips: `cell.formula` keeps the user's text verbatim, so `$` survives without any unparser.
+
+### 6.B — `shift_formula` — the public rewrite helper
+
+`trellis.shift_formula(text: str, rows: int, cols: int) -> str` — token-level splice, not AST re-emission:
+
+- Tokenize; for each IDENT that satisfies the parser's cell-ref predicate, shift the non-`$` axes by the offset; splice the rewritten lexemes back at their `Token.pos` spans. Everything else — spacing, case, function names, the leading `=` — survives byte-for-byte.
+- **A shift off the sheet edge** (row or col < 0) replaces that reference with the literal text `#REF!` (Excel-identical: the pasted formula *contains* `#REF!`). Whether the parser treats `#REF!` in source as a proper error literal or as a parse error is resolved at #3 — either way the cell stores an error value with the text preserved (the broken-formula commit contract from Part 5 already guarantees the fallback).
+- Range refs shift per-corner. `rows=cols=0` returns the text unchanged (identity contract, tested).
+- Public at all three levels (`trellis.formula`, re-export root) + root-README bullet, mirroring `infer_value`'s promotion pattern.
+
+## TUI architecture
+
+### Selection model (grid-owned view state)
+
+- `selection = (anchor, cursor) | None` on `SheetGrid`; the normalised rectangle is a property. **Shift+arrows extend** (anchor pinned, cursor moves — grow-on-demand still applies at the edges); any plain cursor move or Esc collapses it. **Ctrl+A selects `used_range()`**.
+- **Painting:** delta-repaint on selection change — restyle cells entering/leaving the rectangle with a background tint that *composes* with display styling (error-red text on selection tint must survive). Selections bigger than the existing batch-rebuild threshold just rebuild — reuse, don't invent.
+- **Readout:** the formula bar / status line shows `B2:D5 (3×4)` while a selection is live; the formula bar otherwise keeps mirroring the cursor cell.
+
+### Clipboard model (app-owned)
+
+`Clipboard(cells, mode, source_anchor, tsv)` — a snapshot, not live references:
+
+- Per-cell payload: **formula text if the cell has one, else the raw value** (full fidelity — ints, floats, bools, error values carry as objects, no text round-trip internally).
+- `tsv` is the OS mirror built at copy time (display-text fields, embedded tabs/newlines flattened to spaces — pragmatic, resolved at #6); pushed via `copy_to_clipboard`.
+- **Paste targeting:** range payload anchors at the cursor (or selection top-left); a single-cell payload **fills the whole selection** (Excel's fill-on-paste). Every written cell: formula → `shift_formula(text, dr, dc)` with that cell's offset from its source cell (copy mode) or verbatim (cut mode); value → written raw. All inside one `sheet.batch()`; window growth on out-of-window paste rides the existing rebuild-to-cover path for free.
+- **Cut:** marks the clipboard `mode="cut"`, status line shows `cut B2:D4 — paste moves it`; paste writes targets *and* deletes the not-overwritten source cells in the same batch, then the clipboard demotes to copy mode (re-pasting after a move re-stamps a copy — friendlier than Excel's one-shot; deviation noted). Esc cancels a pending cut.
+
+### The Ctrl+V / terminal-paste unification
+
+In most terminals (Windows Terminal included) **Ctrl+V never reaches the app** — it arrives as a Textual `Paste` event carrying text. So both entry points funnel to one `action_paste`:
+
+- `on_paste(text)`: if `text` equals the TSV we last mirrored out → it's our own copy bouncing off the OS — use the **internal** clipboard (formulas shift, values keep fidelity). Otherwise it's **external** TSV/text: split on newlines/tabs, each field through `infer_value` (`=`-leading text commits as a formula verbatim — same policy as typing it; no shifting, external text has no source anchor), batch-written at the cursor.
+- The `ctrl+v` BINDING also exists for terminals that pass the key through; it pastes the internal clipboard directly.
+
+## Rejected / deferred alternatives
+
+- **Inbound-reference rewrite on cut** (Excel's full move semantics) — whole-sheet scan + rewrite of every formula referencing the moved range. Deferred until missed; the pragmatic move covers the daily case.
+- **Marching-ants source highlight** — status-line message instead; one repaint path, no animation timers (the StatusBar no-timers rule extends here).
+- **Fill handle / Ctrl+D fill-down** — adjacent feature, separate part; `shift_formula` is the hard half of it anyway.
+- **Mouse drag-select** — Textual's cell-click events need modifier inspection; checked at #4, included only if free. Keyboard-first is the v1 bar.
+- **Clipboard history / multi-clipboard** — plugin territory the moment the TUI grows hooks; not core, not now.
+
+## Open questions
+
+- Does the parser want `#REF!` (and friends) as first-class error *literals* in source text? Resolve at #3 — leaning yes-if-cheap (one token kind, evaluator returns the constant), fallback is the broken-formula path.
+- Shift+click to extend selection: do DataTable click events expose modifiers in textual 8.x? Check at #4.
+- Selection repaint threshold: reuse the grid's existing 256-cell rebuild threshold for selection restyles, or measure first? Default: reuse, retune by subclassing (the Part 5 class-attribute pattern).
+- TSV mirror fidelity: flattening embedded tabs/newlines is lossy for strings — acceptable for v1 OS interchange? (Internal clipboard is unaffected.)
+
+## Implementation breakdown
+
+| # | What lands | Where |
+|---|------------|-------|
+| 1 | This design pass | design.md Part 6 |
+| 2 | `$` references: lexer + parser predicate + `CellRef` flags; evaluator/recalc indifference proven | core + tests |
+| 3 | Public `shift_formula` (token-splice; `#REF!` policy resolved; identity + pin + range + off-edge table) | core + re-exports + README bullet + tests |
+| 4 | Selection model: Shift+arrows, Ctrl+A, Esc, delta-paint, bar/status readout, Delete clears selection | grid.py + tests |
+| 5 | Internal clipboard: copy + paste (shift/fill/anchor), one-batch write path, dirty/echo riding it | app.py + tests |
+| 6 | Cut (pragmatic move) + OS bridge: TSV mirror out, `Paste`-event in with own-TSV detection, external inference | app.py + tests |
+| 7 | READMEs (key table + features), design.md rows closed, worklog | docs |
+
+Same rhythm as Parts 4–5: each row is a self-contained land with its tests; #4 and #5 are the heart; #6 makes it shine.
+
+## References
+
+- Part 3 — `sheet.batch()` and the locked event payloads every paste rides.
+- Part 5 — the one-repaint-path rule, `commit_text` policy (broken formulas commit as error values), the class-attribute tuning pattern, `infer_value`'s promotion precedent.
+- `src/trellis/formula/errors.py` — `REF` already exists; off-edge shifts have their error waiting.
+- Textual docs: [Paste event](https://textual.textualize.io/api/events/#textual.events.Paste), `App.copy_to_clipboard` (OSC 52), DataTable styling.

@@ -20,7 +20,11 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 **Verified:** core **757** (+doctests) and TUI **86** green on the 3.10 sandbox; demo.csv end-to-end through `build_app` — totals compute (D5 = 22.9) and a B2 edit cascades live. `demo.csv` left untracked (Matthew's call whether it joins the repo as an example).
 
-**Next pick-up:** Matthew re-runs — `trellis demo.csv`, no reinstall needed (editable installs). Then the queue resumes: **Part 6 design pass — selection + clipboard** (chosen this session over undo plugin / sheet tabs / vim keymap). Push to origin still pending from Windows (now 8 commits ahead).
+**Matthew re-ran: "works flawlessly :-{D"** — formulas compute, cascade, and round-trip on his machine. v1 + the formulas= fix are field-verified.
+
+**Part 6 design pass DONE (same session, later) — selection + clipboard scoped in design.md** (~150 lines, Part 6; design.md now 851 lines / 6 parts). Decisions confirmed with Matthew up front (all three "recommended" picks): **(1) Excel-faithful paste + `$` pins** — relative refs shift by the paste offset, engine gains `$A$1`/`$A1`/`A$1` (lexer joins `$` to ident scan, parser predicate grows, `CellRef` gains defaulted `col_abs`/`row_abs` flags, evaluator/recalc stay indifferent — pinned and plain refs are the same dependency); **(2) OS clipboard both ways** — TSV mirror out via OSC 52, terminal `Paste` event in, with own-TSV detection so a bounce off the OS still uses the rich internal clipboard (key insight: Ctrl+V usually never reaches the app — it arrives AS the Paste event); **(3) cut = pragmatic move** — verbatim paste + source cleared in the same batch; inbound-reference rewriting explicitly deferred. The Part-5-style surface probe found this part's promotion: **public `trellis.shift_formula(text, rows, cols)`** — token-splice rewrite preserving formatting byte-for-byte, off-edge refs become literal `#REF!` (the error constant already exists in core). Selection = grid view state (anchor+cursor, Shift+arrows, Ctrl+A, delta-paint composing with error styling); every paste is ONE `sheet.batch()`. Implementation table #1–#7 (#1 = the pass, done); open questions: `#REF!` as parseable error literal (resolve at #3), click-modifier availability (#4), TSV flatten fidelity (#6).
+
+**Next pick-up:** Part 6 row #2 — engine `$` references. Push to origin still pending from Windows (main 9 ahead after the design-pass commit).
 
 ---
 ## 2026-06-06 — Session 32: Part 5 design pass — `trellis-tui` scope
