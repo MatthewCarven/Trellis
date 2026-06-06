@@ -6,19 +6,28 @@ single :class:`Sheet`. Cell values are inferred: empty cells become
 or ``float``, everything else stays a string. Booleans are NOT inferred
 — ``"TRUE"``/``"true"``/``"True"`` is too ambiguous across data sources,
 and Excel itself often quotes booleans as strings on CSV export. A
-leading ``=`` is preserved as literal text; no surprise re-evaluation.
+leading ``=`` is preserved as literal text by default; no surprise
+re-evaluation. Pass ``formulas=True`` to opt in: ``"=..."`` cells are
+stored as live formulas and evaluated once the load batch closes.
 
 Write: :func:`write_csv` and the :meth:`trellis.Sheet.to_csv` method
-write a single sheet to a CSV file. Each cell's ``value`` is written
-(formulas are saved as their computed value, matching Excel's CSV
-export). The bounding rectangle is determined by the maximum populated
-row and column; trailing empty cells inside that rectangle are emitted
-as empty fields, since CSV is rectangular.
+write a single sheet to a CSV file. By default each cell's ``value`` is
+written (formulas are saved as their computed value, matching Excel's
+CSV export); with ``formulas=True``, formula cells emit their source
+text (``cell.formula``, leading ``=`` included) instead. The bounding
+rectangle is determined by the maximum populated row and column;
+trailing empty cells inside that rectangle are emitted as empty fields,
+since CSV is rectangular.
 
 Round-trip behaviour: a workbook with one sheet that contains only
 strings, ints, floats, and ``None`` (= empty) round-trips losslessly.
-Formulas do NOT round-trip — write emits the computed value, read
-treats ``"=..."`` strings as literal text. By design.
+By default formulas do NOT round-trip — write emits the computed value,
+read treats ``"=..."`` strings as literal text. That default is
+deliberate: a CSV from an untrusted source never gets to smuggle live
+formulas in (the classic CSV-injection vector), and a CSV exported for
+other tools carries values they can use. Frontends that treat their own
+CSV files as *spreadsheets* — the TUI does — pass ``formulas=True`` on
+both sides, and formulas survive save/load.
 """
 
 from __future__ import annotations
@@ -87,6 +96,7 @@ def read_csv(
     encoding: str = "utf-8",
     dialect: str = "excel",
     workbook: Workbook | None = None,
+    formulas: bool = False,
 ) -> Workbook:
     """Load a CSV file into a Workbook.
 
@@ -108,6 +118,14 @@ def read_csv(
     workbook
         If given, add the new sheet to this workbook and return it.
         Otherwise a fresh :class:`Workbook` is created.
+    formulas
+        If True, a cell whose text starts with ``=`` is stored as a live
+        formula (and evaluated when the load batch closes) instead of as
+        literal text. Default False — keep it that way for CSVs you
+        didn't write yourself; opt in for files your application saved
+        as spreadsheets (write with ``formulas=True`` to match). A
+        broken formula loads the same way it commits in an editor: the
+        error is the value, the source text is preserved.
 
     Returns
     -------
@@ -131,6 +149,11 @@ def read_csv(
         with sheet.batch():
             for row_idx, row in enumerate(reader):
                 for col_idx, raw in enumerate(row):
+                    if formulas and raw.startswith("="):
+                        # The normal leading-= sugar: stored as a formula,
+                        # evaluated once when the batch closes. Opt-in only.
+                        sheet.set((row_idx, col_idx), raw)
+                        continue
                     value = infer_value(raw)
                     # Skip empty cells — they're already absent. Keeps the
                     # sparse dict sparse; ragged-right rows don't fill in
@@ -162,6 +185,7 @@ def write_csv(
     *,
     encoding: str = "utf-8",
     dialect: str = "excel",
+    formulas: bool = False,
 ) -> None:
     """Write a sheet to a CSV file.
 
@@ -170,8 +194,9 @@ def write_csv(
     if it has a value, a formula, or meta; a cell explicitly set to ``None``
     is empty and does not extend the rectangle). All cells within the
     rectangle are emitted; ``None``/absent cells become empty CSV fields.
-    Formulas are written as their computed value (``cell.value``), not the
-    formula text — matching Excel's CSV export behaviour.
+    By default formulas are written as their computed value
+    (``cell.value``), not the formula text — matching Excel's CSV export
+    behaviour.
 
     Parameters
     ----------
@@ -183,6 +208,13 @@ def write_csv(
         File encoding. Defaults to UTF-8.
     dialect
         A :mod:`csv` dialect name. Defaults to ``"excel"``.
+    formulas
+        If True, a cell that has a formula emits its source text
+        (``cell.formula``, leading ``=`` included) instead of its
+        computed value — even when that value is currently an error;
+        the source is the truth worth keeping. Pair with
+        ``read_csv(..., formulas=True)`` to round-trip. Default False:
+        a values-only CSV is what other tools expect from an export.
     """
     bounds = sheet.used_range()
     if bounds is None:
@@ -201,7 +233,14 @@ def write_csv(
             row: list = []
             for c in range(max_col + 1):
                 cell = cells.get((r, c))
-                if cell is None or cell.value is None:
+                if cell is None:
+                    row.append("")
+                elif formulas and cell.formula is not None:
+                    # Source text wins — checked before the value so a
+                    # formula whose current value is None (or an error)
+                    # still round-trips its text.
+                    row.append(cell.formula)
+                elif cell.value is None:
                     row.append("")
                 else:
                     row.append(_stringify(cell.value))

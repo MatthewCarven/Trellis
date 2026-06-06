@@ -175,3 +175,36 @@ async def test_dirty_marker_in_status():
         label, dirty, _ = _status(app)
         assert dirty is True
         assert label == "(no file)"
+
+
+# ------------------------------------------------- formula round-trip (v1.1)
+# Matthew's first real run found the gap: CSV is the TUI's only format, so
+# the engine's values-only CSV policy silently flattened formulas on save.
+# The TUI now opts in to the engine's formulas= flag on both paths.
+
+
+async def test_save_writes_formula_source_text(tmp_path):
+    p = tmp_path / "out.csv"
+    app = _app(path=str(p))
+    async with app.run_test() as pilot:
+        app.sheet["A1"] = 10
+        app.sheet["B1"] = "=A1*3"
+        await pilot.press("ctrl+s")
+        assert p.read_text(encoding="utf-8").strip() == "10,=A1*3"
+
+
+async def test_round_trip_save_then_reopen_keeps_formulas_live(tmp_path):
+    """The full loop the first run broke: save in the TUI, reopen in the
+    TUI, and the formula is still a formula — recalculating, F2-editable."""
+    p = tmp_path / "sheet.csv"
+    app = _app(path=str(p))
+    async with app.run_test() as pilot:
+        app.sheet["A1"] = 10
+        app.sheet["B1"] = "=A1*3"
+        await pilot.press("ctrl+s")
+
+    reopened = build_app([str(p)])
+    assert reopened.sheet["B1"].formula == "=A1*3"
+    assert reopened.sheet["B1"].value == 30
+    reopened.sheet["A1"] = 100          # live engine, not a fossil
+    assert reopened.sheet["B1"].value == 300

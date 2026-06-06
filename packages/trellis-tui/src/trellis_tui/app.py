@@ -202,7 +202,10 @@ class TrellisApp(App):
 
     def _save_to(self, path: str) -> None:
         try:
-            self.sheet.to_csv(path)
+            # The TUI treats its files as spreadsheets: formulas round-trip
+            # (engine default stays values-only for plain CSV export — use
+            # sheet.to_csv(path) from the REPL when you want that).
+            self.sheet.to_csv(path, formulas=True)
         except OSError as error:
             self._refresh_status(f"save failed: {error}")
             return
@@ -298,7 +301,9 @@ def build_app(args: list[str]) -> TrellisApp | None:
     path = args[0] if args else None
     workbook = None
     if path and Path(path).exists():
-        workbook = read_csv(path)
+        # formulas=True mirrors save: =-cells load live, so a file the TUI
+        # wrote reopens as the same spreadsheet (Matthew's first-run find).
+        workbook = read_csv(path, formulas=True)
     return TrellisApp(workbook, path=path)
 
 

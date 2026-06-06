@@ -3,6 +3,26 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-06 — Session 33: first-run feedback — CSV `formulas=` round-trip
+
+**Context:** chat archive wiped the session task list again — rebuilt (Part 6 design pass / implementation / Matthew-runs-v1). Matthew ran v1 for the first time: `setup-venv.ps1` clean on py3.14.5 + textual 8.2.7, core 749 green on Windows, app boots, editing/dirty/status all live. First-run find: demo.csv's formulas rendered as left-aligned *text*. Root cause: the engine's documented CSV policy (read: leading-`=` stays literal; write: computed values, "formulas do NOT round-trip. By design.") meeting a TUI whose ONLY format is CSV — so every Ctrl+S flattened formulas to values, and my demo.csv embedded formulas the stock loader deliberately doesn't honor. The demo was wrong; the gap it exposed was real.
+
+**Decision (Matthew, this session): opt-in `formulas=` keyword** on `read_csv` / `write_csv` / `Sheet.to_csv`, default **False** = behavior unchanged. The default stays safe-by-default (an untrusted CSV never smuggles in live formulas — the injection vector; a plain export carries values other tools can use) and the TUI passes `formulas=True` on BOTH paths — its files are spreadsheets. Read side: `=`-cells route through the normal leading-`=` sugar inside the existing load batch (one evaluation pass on close; a broken formula loads exactly like it commits in the editor — error as value, source preserved). Write side: `cell.formula` (with its `=`) wins over the value — checked before the value-is-None branch, so a formula whose current value is None or an error still round-trips its source.
+
+**Landed:**
+- Engine: `io/csv.py` (module-docstring policy rewrite + both functions), `core/sheet.py` `to_csv` passthrough.
+- TUI: `build_app` load + `_save_to` save both opt in; TUI README (features + key table), root README (io bullet).
+- Tests: **+8 engine** (`TestFormulasFlag` — read live / default-still-literal / broken-formula-as-error-value; write source-text / default-still-values / broken-keeps-source; round-trip stays *live* (reloaded formula recalcs); comma-in-formula csv quoting) → **core 757**. **+2 TUI** (Ctrl+S writes source text; save→reopen keeps formulas live through `build_app`) → **TUI 86**.
+
+**Sandbox scars — the write-protocol memory earned its keep twice:**
+- Edit-tool append to `tests/test_io_csv.py` silently didn't land at all; the Edit to `sheet.py` landed the edit but **truncated the file tail** (374 of 381 lines, ending mid-statement inside `_BatchContext`). Recovered from `git show HEAD:` + re-applying the change off-mount. Protocol hardened: stage-and-cp for EVERY mount write, verify with ast-parse + line count + sha256.
+- A stale `__pycache__` masked the truncation (mount mtimes don't reliably invalidate pycs; in-tree pyc deletes are permission-blocked). All sandbox test runs now use `PYTHONPYCACHEPREFIX=/tmp/pyc`. Both memories updated.
+
+**Verified:** core **757** (+doctests) and TUI **86** green on the 3.10 sandbox; demo.csv end-to-end through `build_app` — totals compute (D5 = 22.9) and a B2 edit cascades live. `demo.csv` left untracked (Matthew's call whether it joins the repo as an example).
+
+**Next pick-up:** Matthew re-runs — `trellis demo.csv`, no reinstall needed (editable installs). Then the queue resumes: **Part 6 design pass — selection + clipboard** (chosen this session over undo plugin / sheet tabs / vim keymap). Push to origin still pending from Windows (now 8 commits ahead).
+
+---
 ## 2026-06-06 — Session 32: Part 5 design pass — `trellis-tui` scope
 
 **Context:** new session; the session-scoped task list was empty again (same casualty as the move) — rebuilt as 4 tasks (#1 Part 5 design pass, #2 scaffold trellis-tui, #3 implement umbrella, #4 `.memory-backup/` fate). Noticed commit `41089c0` (untrack `.memory-backup/`, keep local-only) already landed after Session 31's worklog entry, so #4 was born resolved — closed it. Local `main` is ahead of the recorded publish point (`37ec605`); Matthew pushes from Windows.

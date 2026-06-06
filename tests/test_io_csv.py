@@ -439,3 +439,109 @@ def test_read_csv_leading_equals_stays_literal_after_refactor(tmp_path):
     sh = wb["Sheet1"]
     assert sh["A1"].value == "=A1+1"   # stored as text
     assert sh["A1"].formula is None    # NOT a formula
+
+
+class TestFormulasFlag:
+    """The ``formulas=`` opt-in on read/write (decided 2026-06-06, from the
+    TUI's first real run: CSV is the TUI's only format, so without this a
+    save flattened every formula to its value). Default stays literal-text /
+    computed-value — these tests are the mirror of
+    ``test_formulas_become_values_after_round_trip`` above."""
+
+    def test_read_formulas_true_loads_live_formulas(self, tmp_path):
+        from trellis import read_csv
+
+        p = tmp_path / "f.csv"
+        p.write_text("10,=A1*3\n", encoding="utf-8")
+        sh = read_csv(p, formulas=True)["Sheet1"]
+        assert sh["B1"].formula == "=A1*3"   # source preserved
+        assert sh["B1"].value == 30          # evaluated on batch close
+        assert sh["A1"].value == 10          # inference untouched for non-=
+
+    def test_read_default_is_still_literal_text(self, tmp_path):
+        from trellis import read_csv
+
+        p = tmp_path / "f.csv"
+        p.write_text("10,=A1*3\n", encoding="utf-8")
+        sh = read_csv(p)["Sheet1"]           # no flag: policy unchanged
+        assert sh["B1"].value == "=A1*3"
+        assert sh["B1"].formula is None
+
+    def test_read_formulas_true_broken_formula_is_error_value(self, tmp_path):
+        """Same contract as committing a broken formula in an editor:
+        the error is the value, the source text is kept."""
+        from trellis import FormulaError, read_csv
+
+        p = tmp_path / "f.csv"
+        p.write_text("=SUM(\n", encoding="utf-8")
+        sh = read_csv(p, formulas=True)["Sheet1"]
+        assert sh["A1"].formula == "=SUM("
+        assert isinstance(sh["A1"].value, FormulaError)
+
+    def test_write_formulas_true_emits_source_text(self, tmp_path):
+        from trellis import Workbook
+        from trellis.io import write_csv
+
+        wb = Workbook()
+        sh = wb.add_sheet("F")
+        sh["A1"] = 10
+        sh["B1"] = "=A1*3"
+        out = tmp_path / "f.csv"
+        write_csv(sh, out, formulas=True)
+        assert out.read_text(encoding="utf-8").strip() == "10,=A1*3"
+
+    def test_write_default_still_emits_computed_values(self, tmp_path):
+        from trellis import Workbook
+
+        wb = Workbook()
+        sh = wb.add_sheet("F")
+        sh["A1"] = 10
+        sh["B1"] = "=A1*3"
+        out = tmp_path / "f.csv"
+        sh.to_csv(out)                       # no flag: policy unchanged
+        assert out.read_text(encoding="utf-8").strip() == "10,30"
+
+    def test_write_formulas_true_broken_formula_keeps_source(self, tmp_path):
+        """The source is the truth worth keeping — not the error code."""
+        from trellis import Workbook
+
+        wb = Workbook()
+        sh = wb.add_sheet("F")
+        sh["A1"] = "=SUM("
+        out = tmp_path / "f.csv"
+        sh.to_csv(out, formulas=True)
+        assert out.read_text(encoding="utf-8").strip() == "=SUM("
+
+    def test_round_trip_formulas_stay_live(self, tmp_path):
+        """Write→read with the flag is a real spreadsheet round-trip:
+        the reloaded formula recalculates when its input changes."""
+        from trellis import Workbook, read_csv
+
+        wb = Workbook()
+        sh = wb.add_sheet("F")
+        sh["A1"] = 10
+        sh["A2"] = 20
+        sh["B1"] = "=SUM(A1:A2)"
+        out = tmp_path / "f.csv"
+        sh.to_csv(out, formulas=True)
+
+        sh2 = read_csv(out, formulas=True)["Sheet1"]
+        assert sh2["B1"].formula == "=SUM(A1:A2)"
+        assert sh2["B1"].value == 30
+        sh2["A1"] = 100                      # live, not a fossil
+        assert sh2["B1"].value == 120
+
+    def test_round_trip_formula_containing_commas_is_quoted(self, tmp_path):
+        """csv quoting protects argument commas in formula text."""
+        from trellis import Workbook, read_csv
+
+        wb = Workbook()
+        sh = wb.add_sheet("F")
+        sh["A1"] = 1
+        sh["B1"] = 2
+        sh["C1"] = "=SUM(A1,B1)"
+        out = tmp_path / "f.csv"
+        sh.to_csv(out, formulas=True)
+        sh2 = read_csv(out, formulas=True)["Sheet1"]
+        assert sh2["C1"].formula == "=SUM(A1,B1)"
+        assert sh2["C1"].value == 3

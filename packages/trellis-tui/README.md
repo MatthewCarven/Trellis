@@ -11,7 +11,7 @@ The terminal frontend for [Trellis](../../README.md) — a [Textual](https://tex
 - A live grid over the engine: A1-anchored window that grows as you arrow into empty space; Excel-faithful rendering (`4.0` → `4`, `TRUE`/`FALSE` centered, errors as red `#DIV/0!` codes, float noise trimmed so `=0.1+0.2` shows `0.3`).
 - Excel-ish editing: type to replace, `F2`/`Enter` to revise, commits move the cursor, and typed input gets the engine's conservative inference (`42` is a number, `01234` stays text — the same public `trellis.infer_value` rule CSV loading uses).
 - Formulas commit even when broken: the error value shows in the grid and `F2` hands your text back. Errors are values here.
-- CSV open/save, dirty tracking, a quit guard, and a status line that shows what recalculated and why (`recalc B1 ← A1`).
+- CSV open/save **with formulas intact** — the TUI passes `formulas=True` to the engine's CSV I/O both ways, so `=SUM(A1:A2)` survives save and reopen as a live formula. (Want a values-only export for other tools? That's the engine default: `sheet.to_csv(path)` from a REPL.) Plus dirty tracking, a quit guard, and a status line that shows what recalculated and why (`recalc B1 ← A1`).
 
 Deliberately **not** in v1 (each with a reason in design.md): selection ranges + clipboard, undo (a future plugin — the event payloads already carry everything it needs), sheet tabs, themes, a TUI plugin API.
 
@@ -52,7 +52,7 @@ python -m trellis_tui  # same thing
 | `Delete` | clear the cell | delete right |
 | `Backspace` | clear + start an empty edit | delete left |
 | `Ctrl+Home` | jump to A1 | — |
-| `Ctrl+S` | save CSV (modal path prompt if pathless) | saves committed state |
+| `Ctrl+S` | save CSV, formulas included (modal path prompt if pathless) | saves committed state |
 | `Ctrl+Q` | quit — warns once if unsaved | quit |
 
 Commit rules: empty text clears the cell; a leading `=` is a formula (a broken formula commits as its error value — fix it later with `F2`); everything else gets `int → float → string` inference with the CSV loader's conservatisms (leading zeros, `+` signs, surrounding whitespace, and scientific notation all stay strings). An unmodified revise-edit commits nothing, so `F2` + `Enter` is always a safe no-op.

@@ -292,19 +292,29 @@ class Sheet(Emitter):
 
     # --- file I/O --------------------------------------------------------
 
-    def to_csv(self, path, *, encoding: str = "utf-8", dialect: str = "excel") -> None:
+    def to_csv(
+        self,
+        path,
+        *,
+        encoding: str = "utf-8",
+        dialect: str = "excel",
+        formulas: bool = False,
+    ) -> None:
         """Write this sheet to a CSV file.
 
-        Convenience wrapper for :func:`trellis.io.csv.write_csv`. Each
-        cell's ``value`` is written (formulas emit their computed value,
-        matching Excel's CSV export). The sheet's bounding rectangle is
-        determined by the maximum populated row and column.
+        Convenience wrapper for :func:`trellis.io.csv.write_csv`. By
+        default each cell's ``value`` is written (formulas emit their
+        computed value, matching Excel's CSV export); ``formulas=True``
+        emits formula source text instead — pair with
+        ``read_csv(..., formulas=True)`` to round-trip a spreadsheet.
+        The sheet's bounding rectangle is determined by the maximum
+        populated row and column.
 
         Lazy-imports :mod:`trellis.io.csv` so the core ``Sheet`` class
         does not depend on the io subpackage at import time.
         """
         from ..io.csv import write_csv
-        write_csv(self, path, encoding=encoding, dialect=dialect)
+        write_csv(self, path, encoding=encoding, dialect=dialect, formulas=formulas)
 
     # --- introspection ---------------------------------------------------
 
