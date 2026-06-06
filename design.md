@@ -736,7 +736,7 @@ One pure function `display(value) -> DisplayText(text, align, error)` (frozen da
 | #4 | Read-only `SheetGrid` | window materialization (`used_range()` ∪ min, grow-on-demand), headers, cursor, formula-bar mirroring, event-driven repaint incl. `sheet:batch`; Pilot tests — **DONE** (Session 32) |
 | #5 | Editing | replace/revise edits, commit/cancel keys, typed-input inference, `Delete`, dirty flag; Pilot tests — **DONE** (Session 32) |
 | #6 | CSV open/save + app chrome | CLI-arg open, `Ctrl+S` (+ pathless prompt), status line, `Ctrl+Q` dirty warning; Pilot tests — **DONE** (Session 32) |
-| #7 | README + sign-off | TUI README (usage, key table, "frontend not plugin" note), root README status update, WORKLOG |
+| #7 | README + sign-off | TUI README (usage, key table, "frontend not plugin" note), root README status update, WORKLOG — **DONE** (Session 32). **Part 5 #1–#7 COMPLETE; all open questions resolved.** |
 
 Same rhythm as Part 4: each row lands as a self-contained chunk with its tests. #4 is the heart (the Part 3 surface, consumed); #5 makes it an editor; #6 makes it an app.
 

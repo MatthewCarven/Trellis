@@ -11,7 +11,7 @@ The project's design philosophy is *open extensibility*. The core is small. Almo
 
 ## Status
 
-Pre-alpha. Public API is unstable until 0.1.
+Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, a reference plugin ([trellis-mathpack](packages/trellis-mathpack)), and the terminal app ([trellis-tui](packages/trellis-tui), v1).
 
 ## Quick taste (library)
 
@@ -37,15 +37,24 @@ print(sh["B2"].value)   # 'big'
 
 22 built-in functions ship with the engine — aggregates (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`), scalar math (`ABS`, `ROUND`, `INT`), logical (`IF`, `IFERROR`, `ISERROR`, `AND`, `OR`, `NOT`), type checks (`ISBLANK`, `ISNUMBER`, `ISTEXT`), and text (`CONCAT`, `LEN`, `LEFT`, `RIGHT`, `MID`). Anything else is a plugin — see [docs/plugin-example.md](docs/plugin-example.md).
 
+## Quick taste (terminal app)
+
+```
+# in a venv (scripts/setup-venv.ps1 or .sh builds one for you):
+pip install -e . -e packages/trellis-tui
+trellis data.csv
+```
+
+Arrow around, type to edit, `=SUM(A1:A3)` recalculates as you'd hope, `Ctrl+S` saves, `Ctrl+Q` quits. Full key table and notes in [packages/trellis-tui/README.md](packages/trellis-tui/README.md). On Windows, run it inside Windows Terminal.
+
 ## Install
 
 Not yet on PyPI. Once published:
 
 ```
 pip install trellis           # engine only
-pip install trellis[tui]      # plus the terminal UI
-pip install trellis[xlsx]     # plus .xlsx read/write
-pip install trellis[all]      # the lot
+pip install trellis-tui       # the terminal app (depends on the engine)
+pip install trellis[xlsx]     # plus .xlsx read/write (future)
 ```
 
 ## Extending

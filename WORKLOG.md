@@ -60,7 +60,14 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 - **`scripts/setup-venv.{sh,ps1}` updated** to also editable-install trellis-tui (+ pytest-asyncio) — they predated the TUI; the `trellis` command now lands in the venv they build.
 - Tests: **`test_chrome.py`, 15** — build_app variants (incl. missing path), save + dirty-clear, pathless modal flow, Esc cancel, save-failure-keeps-running (directory as path), save-mid-edit, quit-warn → quit, re-arm on new write, clean quit, recalc trigger note, dirty marker. **TUI suite 84**; core **749**.
 
-**Next pick-up:** **Part 5 #7 — README for real + sign-off** (TUI README full pass incl. Windows Terminal note, root README gets the terminal app, design.md sweep). Then Part 5 is COMPLETE and v1 ships.
+**Part 5 #7 DONE (same session, later) — README for real. PART 5 COMPLETE: trellis-tui v1 SHIPS.**
+- TUI README full pass: v1 status (what's in, what's deliberately out), install via the venv scripts or by hand, usage incl. the new-file flow, the complete key table + commit rules (incl. the unchanged-revise no-op guarantee), **Windows Terminal note** (Textual renders poorly in legacy conhost), develop/test with the "the render table IS the spec" line.
+- Root README: new "Quick taste (terminal app)" section; Install block updated (`trellis-tui` is its own package — the aspirational `trellis[tui]` line replaced); Status now names all three monorepo distributions. The day-one "terminal-first spreadsheet application" promise is true.
+- design.md: #6/#7 rows DONE. **All Part 5 rows #1–#7 done, every open question resolved** (textual pin, window defaults, float display, prefill, nav-Enter, empty commit, pathless prompt).
+- **Part 5 retrospective, one line each:** the design pass found a real public-surface gap before any TUI code existed (`infer_value`); the 3.1 payload lock-in carried the whole renderer (no-op skip, batch echo, the `trigger` status note); mathpack's errors-are-values lesson became UX (broken formulas commit and F2 retrieves); the Pilot suite caught two real Textual races (select-on-focus seed-eating, post-unmount messages). "Library first, app second" held — the TUI never needed a core internal beyond the one promotion it was designed to flush out.
+- **Suites at sign-off: core 749, TUI 84.** Run it: `scripts\setup-venv.ps1` → `.venv\Scripts\Activate.ps1` → `trellis [file.csv]` (Windows Terminal).
+
+**Next pick-up:** Matthew runs v1. Beyond that, candidates in rough order of pull: selection + clipboard (most-missed), the undo plugin (second reference plugin — payloads already carry old/new), sheet tabs, a vim keymap (first TUI-extensibility proof), xlsx extra. Matthew's call. Also still pending from S31: syncing licenses on his other repos.
 
 ---
 ## 2026-06-06 — Session 31: post-move pickup — roadmap rebuilt + venv setup scripts
