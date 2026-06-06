@@ -38,6 +38,16 @@ terminal ``Paste`` event — our own TSV bouncing back routes to the
 full-fidelity internal clipboard, anything else parses as external
 TSV/text, every field through ``commit_text`` (the typing policy:
 ``=``-leading text commits as a formula verbatim, no shifting).
+
+Undo (Part 7 #4): the app attaches a ``trellis_undo.UndoLog`` to the
+sheet on mount (public as ``app.undo_log`` and at
+``sheet.meta["undo"]`` — the same log a REPL would reach for) and
+detaches on unmount. Ctrl+Z / Ctrl+Y arrive as grid intents; one TUI
+gesture is one step (edits singly, pastes/selection-deletes/loads as
+their batch). Undo writes are engine writes: the grid repaints via the
+echo, dirty marks honestly (save-point tracking DECIDED against for
+v1 — depth equality lies near the history cap), and a pending cut
+disarms through the same ``_mark_dirty`` hook as always.
 """
 
 from __future__ import annotations
@@ -54,6 +64,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Label, Static
 
 from trellis import Cell, Sheet, Workbook, read_csv, shift_formula, to_a1
+from trellis_undo import attach as attach_undo, detach as detach_undo
 
 from . import __version__
 from .editor import CellEditor, FormulaBar, commit_text, prefill_text
@@ -219,6 +230,10 @@ class TrellisApp(App):
 
     def on_mount(self) -> None:
         self.sub_title = self.path or "new workbook"
+        #: The sheet's undo history (also at ``sheet.meta["undo"]``).
+        #: Attached here, after any CSV load — opening a file is not an
+        #: undoable gesture (matching every editor).
+        self.undo_log = attach_undo(self.sheet)
         self.query_one(FormulaBar).show_cell(self.sheet, (0, 0))
         # Dirty tracking + the recalc note ride the same engine events as
         # the repaint loop (recalc is derived state — it never dirties).
@@ -233,6 +248,7 @@ class TrellisApp(App):
         self._refresh_status(message)
 
     def on_unmount(self) -> None:
+        detach_undo(self.sheet)
         for unsubscribe in self._subs:
             unsubscribe()
         self._subs = []
@@ -401,6 +417,24 @@ class TrellisApp(App):
 
     def on_sheet_grid_paste_request(self, message: SheetGrid.PasteRequest) -> None:
         self._paste_internal(message.rect)
+
+    # --------------------------------------------------------------- undo
+
+    def on_sheet_grid_undo_request(self, message: SheetGrid.UndoRequest) -> None:
+        """One step back. The restore is an engine write like any other:
+        the grid repaints via the echo, dirty marks honestly."""
+        count = self.undo_log.undo()
+        if count is None:
+            self._refresh_status("nothing to undo")
+        else:
+            self._refresh_status(f"undid {count} cell{'' if count == 1 else 's'}")
+
+    def on_sheet_grid_redo_request(self, message: SheetGrid.RedoRequest) -> None:
+        count = self.undo_log.redo()
+        if count is None:
+            self._refresh_status("nothing to redo")
+        else:
+            self._refresh_status(f"redid {count} cell{'' if count == 1 else 's'}")
 
     def _paste_internal(self, rect) -> None:
         """Paste the internal clipboard into the target rect, ONE batch.

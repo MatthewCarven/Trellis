@@ -26,7 +26,9 @@ classifiers = [
 # [project.entry-points."trellis.plugins"] section here — core never learns
 # this package exists ("library first, app second", design.md Part 5).
 # The textual dependency lives HERE so the core engine stays dependency-free.
-dependencies = ["trellis", "textual>=8"]
+# trellis-undo is a hard dependency (DECIDED, Part 7): Ctrl+Z works out
+# of the box.
+dependencies = ["trellis", "textual>=8", "trellis-undo"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-asyncio>=0.23"]

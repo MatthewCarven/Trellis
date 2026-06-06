@@ -180,6 +180,12 @@ class SheetGrid(DataTable):
         Binding("ctrl+c", "request_copy", "Copy", show=False),
         Binding("ctrl+x", "request_cut", "Cut", show=False),
         Binding("ctrl+v", "request_paste", "Paste", show=False),
+        # Undo/redo (Part 7 #4). Grid-bound for the same reason as the
+        # clipboard keys: while the CellEditor has focus, Ctrl+Z must
+        # not touch the sheet.
+        Binding("ctrl+z", "request_undo", "Undo", show=False),
+        Binding("ctrl+y", "request_redo", "Redo", show=False),
+        Binding("ctrl+shift+z", "request_redo", "Redo", show=False),
     ]
 
     def __init__(self, sheet: Sheet, **kwargs: Any) -> None:
@@ -591,3 +597,17 @@ class SheetGrid(DataTable):
         self.post_message(
             self.PasteRequest(self.selection_range or self.cursor_rect())
         )
+
+    # Undo intents (Part 7 #4): no payload — the app owns the UndoLog.
+
+    class UndoRequest(Message):
+        """Undo the newest history step (Ctrl+Z)."""
+
+    class RedoRequest(Message):
+        """Re-apply the newest undone step (Ctrl+Y / Ctrl+Shift+Z)."""
+
+    def action_request_undo(self) -> None:
+        self.post_message(self.UndoRequest())
+
+    def action_request_redo(self) -> None:
+        self.post_message(self.RedoRequest())
