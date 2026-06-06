@@ -1,8 +1,8 @@
 """TrellisApp — the application shell (bindings, file open/save, main()).
 
-Scaffold stage (Part 5 #2): the app boots, loads a CSV if given one, shows
-a placeholder summary, and quits. The real layout — ``SheetGrid`` + formula
-bar + status line — lands in #4 (grid), #5 (editing), #6 (CSV/chrome).
+Stage #4: the real layout — ``SheetGrid`` (read-only toward the engine)
++ ``FormulaBar`` mirroring the cursor. Editing lands in #5, CSV save and
+status chrome in #6.
 """
 
 from __future__ import annotations
@@ -10,11 +10,13 @@ from __future__ import annotations
 import sys
 
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header
 
-from trellis import Workbook, read_csv, to_a1
+from trellis import Sheet, Workbook, read_csv
 
 from . import __version__
+from .editor import FormulaBar
+from .grid import SheetGrid
 
 
 def _empty_workbook() -> Workbook:
@@ -26,12 +28,15 @@ def _empty_workbook() -> Workbook:
 class TrellisApp(App):
     """The Trellis terminal spreadsheet.
 
-    Holds a live engine ``Workbook`` (the model — same object a REPL would
-    drive) and, for now, a placeholder body proving the wiring end to end:
-    engine -> textual -> console script.
+    Holds a live engine ``Workbook`` — the same object a REPL would
+    drive. Single visible sheet in v1 (the workbook's first); the model
+    is the engine, the grid is a render cache of it.
     """
 
     TITLE = "Trellis"
+    CSS = """
+    SheetGrid { height: 1fr; }
+    """
     BINDINGS = [("ctrl+q", "quit", "Quit")]
 
     def __init__(
@@ -44,22 +49,32 @@ class TrellisApp(App):
         self.workbook = workbook if workbook is not None else _empty_workbook()
         #: CSV path for Ctrl+S (#6); ``None`` = pathless (prompt on save).
         self.path = path
+        #: v1 shows the workbook's first sheet (single-sheet decision).
+        self.sheet: Sheet = next(iter(self.workbook.sheets()))
 
-    def compose(self) -> ComposeResult:  # TODO(Part 5 #4): SheetGrid + bar + status
+    def compose(self) -> ComposeResult:
         yield Header()
-        yield Static(self._summary(), id="placeholder")
+        yield FormulaBar()
+        yield SheetGrid(self.sheet)
         yield Footer()
 
-    def _summary(self) -> str:
-        sheet = next(iter(self.workbook.sheets()))
-        bounds = sheet.used_range()
-        extent = "empty" if bounds is None else f"{to_a1(*bounds[0])}:{to_a1(*bounds[1])}"
-        return (
-            f"trellis-tui {__version__} — scaffold\n\n"
-            f"loaded: {self.path or '(new workbook)'}\n"
-            f"sheet: {sheet.name!r}   used range: {extent}\n\n"
-            "The grid lands next (design.md Part 5 #4).  Ctrl+Q quits."
-        )
+    def on_mount(self) -> None:
+        self.sub_title = self.path or "new workbook"
+        self.query_one(FormulaBar).show_cell(self.sheet, (0, 0))
+
+    def on_data_table_cell_highlighted(
+        self, event: DataTable.CellHighlighted
+    ) -> None:
+        """Mirror the cursor's cell into the formula bar.
+
+        Messages can outlive widgets (a highlight posted just before
+        shutdown arrives after the bar unmounts) — query defensively.
+        """
+        bars = self.query(FormulaBar)
+        if bars:
+            bars.first().show_cell(
+                self.sheet, (event.coordinate.row, event.coordinate.column)
+            )
 
 
 def main(argv: list[str] | None = None) -> int:

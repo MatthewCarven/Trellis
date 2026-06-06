@@ -21,6 +21,18 @@ Run it as ``trellis [file.csv]`` (console script) or
 
 __version__ = "0.1.0"
 
-from .app import TrellisApp, main  # noqa: E402  (__version__ first: app.py imports it)
+# __version__ first: app.py imports it back from the package.
+from .app import TrellisApp, main  # noqa: E402
+from .editor import FormulaBar  # noqa: E402
+from .grid import SheetGrid  # noqa: E402
+from .render import DisplayText, display  # noqa: E402
 
-__all__ = ["TrellisApp", "main", "__version__"]
+__all__ = [
+    "DisplayText",
+    "FormulaBar",
+    "SheetGrid",
+    "TrellisApp",
+    "display",
+    "main",
+    "__version__",
+]

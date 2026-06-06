@@ -721,7 +721,7 @@ One pure function `display(value) -> DisplayText(text, align, error)` (frozen da
 - **Nav-mode `Enter`**: Excel moves down; Sheets starts an edit. Lean: revise-edit (Down already moves; a second move-down key is wasted). Decide in #5.
 - **Empty commit**: store `""` or `sheet.delete`? Lean: delete (Excel-faithful, keeps `used_range()` tight).
 - ~~**Textual pin style**~~ **DECIDED (#2, Session 32):** `>=8` uncapped — cap on a proven break, not preemptively; scaffold verified green on 8.2.7.
-- **Window defaults**: minimum grid 26×100? grow-by increments? Decide in #4 by feel.
+- ~~**Window defaults**~~ **DECIDED (#4, Session 32):** 100 rows × 26 cols minimum; grow +32 rows / +8 cols when the cursor comes within 2 of an edge; batch-rebuild threshold 256 changes; column width 10. All class attributes on `SheetGrid` — retune by subclassing, no config system. Out-of-window engine writes rebuild the window to cover them; the cursor's high-water reach survives rebuilds.
 - ~~**Float display**~~ **DECIDED (#3, Session 32):** integer form for integral floats within ±1e16, else `%.15g`; `NaN`/`Infinity` as themselves. `tests/test_render.py`'s table is the spec.
 - **Revise-edit prefill (new, found in #3):** `display()` deliberately trims floats to 15g, so an F2-commit round-trip through display text could alter a stored noisy value. Lean: prefill from `cell.formula` when set, else `repr(value)`. Decide in #5.
 - **Pathless `Ctrl+S` prompt**: in the formula bar vs a modal. Decide in #6.
@@ -733,7 +733,7 @@ One pure function `display(value) -> DisplayText(text, align, error)` (frozen da
 | #1 | Write this scope (Part 5) | (this doc) |
 | #2 | Scaffold `packages/trellis-tui/` + core housekeeping | pyproject (`textual` dep, `trellis` script), src/tests skeleton, README skeleton; bump core's stale `tui`/`all` extras; **promote `_infer_value` → public** (+ tests, README line) — **DONE** (Session 32) |
 | #3 | `render.py` display policy | pure functions, table-driven unit tests; settle the float rule — **DONE** (Session 32) |
-| #4 | Read-only `SheetGrid` | window materialization (`used_range()` ∪ min, grow-on-demand), headers, cursor, formula-bar mirroring, event-driven repaint incl. `sheet:batch`; Pilot tests |
+| #4 | Read-only `SheetGrid` | window materialization (`used_range()` ∪ min, grow-on-demand), headers, cursor, formula-bar mirroring, event-driven repaint incl. `sheet:batch`; Pilot tests — **DONE** (Session 32) |
 | #5 | Editing | replace/revise edits, commit/cancel keys, typed-input inference, `Delete`, dirty flag; Pilot tests |
 | #6 | CSV open/save + app chrome | CLI-arg open, `Ctrl+S` (+ pathless prompt), status line, `Ctrl+Q` dirty warning; Pilot tests |
 | #7 | README + sign-off | TUI README (usage, key table, "frontend not plugin" note), root README status update, WORKLOG |
