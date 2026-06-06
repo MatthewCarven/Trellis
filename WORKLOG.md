@@ -3,6 +3,25 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-06 — Session 31: post-move pickup — roadmap rebuilt + venv setup scripts
+
+**Context:** first session in the renamed/moved folder (`-=Programming=-\Trellis`). The move worked: memory-space link survived (all 10 memories recalled, no restore from `.memory-backup/` needed), git intact. Matthew cleaned up the stray `pytest-cache-files-*` dir. Casualty: the session-scoped task-list roadmap was empty.
+
+**What got done**
+- **Task-list roadmap regenerated** (5 tasks): #1 first GitHub publish (gate cleared, Matthew's call); #2 Part 5 design pass — trellis-tui scope in design.md; #3 scaffold `packages/trellis-tui/` (blocked by #2); #4 implement TUI (umbrella, subtasks TBD from design); #5 decide fate of `.memory-backup/`.
+- **`scripts/setup-venv.ps1` + `scripts/setup-venv.sh`** — recreate the repo-root `.venv`: editable-install core + mathpack + pytest, then run the core suite (+doctests) as verification. The sh variant takes `VENV_DIR` (sandbox needs off-mount) and `PIP_FLAGS` (`--ignore-requires-python` on the 3.10 sandbox); both are no-ops on a real 3.11+ machine. Written via the /tmp staging protocol, sha256-verified.
+
+**Discovered along the way**
+- **Mathpack's Tier-1 tests cannot run inside an installed venv.** With mathpack pip-installed, `import trellis` auto-discovers it, so `test_import_alone_registers_nothing` (and the FUNCTIONS-delta test) fail at baseline; and the `TRELLIS_DISABLE_PLUGIN_DISCOVERY` kill switch is no help because it also disables *explicit* `load_plugins([...])` calls, which breaks the FakeEntryPoint tests instead. Both failure modes confirmed empirically. Conclusion (by design, now documented in the scripts): Tier-1 is hermetic-only (`PYTHONPATH`, uninstalled); the installed-context proof is `tier2_discovery_check.sh`. The setup scripts therefore verify with the core suite only.
+- Stale `__pycache__` dirs survived the move with the old "Cross Tabulator Pro" session paths baked into tracebacks — cosmetic; cleaning them is pending Matthew's nod (mount deletes need the permission tool).
+
+**Verified:** `scripts/setup-venv.sh` end-to-end in the sandbox (off-mount venv): editable installs clean, **748 passed** (741 + 7 doctests), exit 0.
+
+**Next pick-up** (unchanged): Matthew's call — first GitHub publish and/or the Part 5 trellis-tui design pass.
+
+---
+
+
 ## 2026-06-06 — Session 30: auto-memory backup + folder rename/move prep
 
 **Context:** Matthew is about to rename/move the project folder from "Cross Tabulator Pro" to **Trellis** — most likely by moving contents into the already-mounted empty `-=Programming=-\Trellis` folder (also flattens the old double-nesting). Claude's auto-memory lives outside the folder (AppData, keyed by space ID); the files can't be lost by the move, but the folder↔memory-space *link* might not survive it.
