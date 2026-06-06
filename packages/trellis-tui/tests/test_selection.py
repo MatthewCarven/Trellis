@@ -148,6 +148,20 @@ async def test_ctrl_a_on_empty_sheet_is_noop():
         assert app.query_one(SheetGrid).selection is None
 
 
+async def test_ctrl_and_alt_click_also_extend():
+    # Most terminals never forward shift+click (they keep it for native
+    # text selection) — ctrl/alt survive, so they extend too (S35).
+    app = _app()
+    async with app.run_test() as pilot:
+        grid = app.query_one(SheetGrid)
+        region = grid._get_cell_region(Coordinate(1, 1))
+        await pilot.click(SheetGrid, offset=(region.x + 1, region.y), control=True)
+        assert grid.selection == ((0, 0), (1, 1))
+        region = grid._get_cell_region(Coordinate(3, 2))
+        await pilot.click(SheetGrid, offset=(region.x + 1, region.y), meta=True)
+        assert grid.selection == ((0, 0), (3, 2))  # anchor survives
+
+
 async def test_shift_click_extends_and_plain_click_collapses():
     app = _app()
     async with app.run_test() as pilot:

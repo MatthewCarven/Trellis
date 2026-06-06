@@ -149,6 +149,31 @@ async def test_own_tsv_paste_event_routes_to_internal_clipboard():
         assert app.sheet["B3"].formula == "=A3*2"
 
 
+async def test_own_tsv_bounce_survives_crlf_and_trailing_newline():
+    # Windows clipboards speak CRLF and some paths append a newline —
+    # the own-TSV detection must still recognise itself (S35), or a
+    # multi-row bounce quietly downgrades to values-only.
+    def populate(sh):
+        sh["A1"] = 10
+        sh["B1"] = "=A1*2"
+        sh["A2"] = 3
+        sh["B2"] = "=A2*2"
+
+    app = _app(populate)
+    async with app.run_test() as pilot:
+        grid = app.query_one(SheetGrid)
+        await pilot.press("shift+right", "shift+down", "ctrl+c")  # A1:B2
+        assert "\n" in app.sheet_clipboard.tsv  # multi-row: the risky case
+        mangled = app.sheet_clipboard.tsv.replace("\n", "\r\n") + "\r\n"
+        grid.move_cursor(row=4, column=0)  # A5
+        await pilot.pause()
+        await pilot.press("escape")  # collapse; paste targets the cursor
+        app.post_message(events.Paste(mangled))
+        await pilot.pause()
+        assert app.sheet["B5"].formula == "=A5*2"  # internal path: shifted
+        assert app.sheet["B6"].formula == "=A6*2"
+
+
 async def test_external_tsv_paste_infers_fields_in_one_batch():
     app = _app()
     async with app.run_test() as pilot:

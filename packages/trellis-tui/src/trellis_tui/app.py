@@ -67,6 +67,15 @@ def _empty_workbook() -> Workbook:
     return wb
 
 
+def _normalize_paste(text: str) -> str:
+    """Line-ending-proof a pasted text for own-TSV comparison: CRLF/CR
+    become LF and one trailing newline is forgiven. The mirror itself is
+    always LF-joined with no trailing newline, so this only widens what
+    we recognise as our own."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text[:-1] if text.endswith("\n") else text
+
+
 def _tsv_field(text: str) -> str:
     """Flatten one display-text field for the TSV mirror (embedded tabs
     and newlines would break the grid shape — pragmatic lossy flatten,
@@ -495,7 +504,12 @@ class TrellisApp(App):
         grid = grids.first()
         rect = grid.selection_range or grid.cursor_rect()
         clip = self.sheet_clipboard
-        if clip is not None and event.text == clip.tsv:
+        if clip is not None and _normalize_paste(event.text) == clip.tsv:
+            # Line endings get rewritten between us and the OS (Windows
+            # clipboards speak CRLF; some paths append a trailing
+            # newline) — normalize before comparing, or a multi-row
+            # bounce of our own TSV silently loses its formulas to the
+            # external path (field-tested, S35).
             self._paste_internal(rect)
         else:
             self._paste_external(event.text, rect)

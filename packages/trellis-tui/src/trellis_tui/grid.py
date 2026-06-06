@@ -17,7 +17,8 @@ The view half of the one-repaint-path contract:
   the controller's job (``editor.py``, Part 5 #5).
 - **Selection is view state** (Part 6 #4): ``(anchor, cursor)`` — the
   anchor pins where extension started; the cursor IS the DataTable
-  cursor. Shift+arrows and shift+click extend, Ctrl+A selects
+  cursor. Shift+arrows and modifier+click (shift/ctrl/alt — most
+  terminals steal shift+mouse for native selection) extend, Ctrl+A selects
   ``used_range()``, Esc or any plain cursor move collapses. Painting is
   a delta-restyle of the cells entering/leaving the rectangle — the
   tint *composes* with display styling (error red survives selection) —
@@ -294,12 +295,18 @@ class SheetGrid(DataTable):
         self.post_message(self.SelectionChanged(None))
 
     async def _on_click(self, event) -> None:
-        # Shift+click extends the selection to the clicked cell (resolved
-        # open question: Click DOES expose modifiers in textual 8.x).
-        # Pin the anchor BEFORE DataTable moves the cursor, so the move
-        # arrives flagged as an extension. Plain clicks fall through and
-        # collapse via the plain-move path, like any other cursor move.
-        if event.shift:
+        # Modifier+click extends the selection to the clicked cell
+        # (resolved open question: Click DOES expose modifiers in
+        # textual 8.x). Shift+click is the Excel gesture, but most
+        # terminal emulators reserve Shift+mouse for their own text
+        # selection and never forward it to the app (Windows Terminal
+        # included — field-tested, S35). Ctrl and Alt ARE forwarded as
+        # SGR modifier bits, so accept all three: whichever survives
+        # your terminal extends the selection. Pin the anchor BEFORE
+        # DataTable moves the cursor, so the move arrives flagged as an
+        # extension. Plain clicks fall through and collapse via the
+        # plain-move path, like any other cursor move.
+        if event.shift or event.ctrl or event.meta:
             meta = event.style.meta
             row, col = meta.get("row"), meta.get("column")
             if (

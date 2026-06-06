@@ -3,6 +3,17 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-07 — Session 35: field feedback on Part 6 — two terminal-reality fixes
+
+**Context:** Matthew field-ran selection+clipboard against OpenOffice Calc. Paste OO→Trellis and Trellis→OO both worked — values only, which prompted the question: where are the formulas? Answer recorded here for posterity: the OS *text* clipboard carries computed display values by ecosystem convention (Excel and OO both mirror values into text/plain; formula interchange between GUI spreadsheets rides rich formats — ODF/BIFF/XML — that no terminal app can speak). Trellis matches Excel exactly: values out, typed-input semantics in, full fidelity Trellis→Trellis via the internal clipboard. NOT a bug — but his report flushed out two things that WERE:
+
+**Fix 1 — own-TSV detection was line-ending brittle (real formula-loss risk).** Windows clipboards speak CRLF and some paths append a trailing newline; our mirror is LF-joined. A multi-row Trellis→Trellis paste bouncing through the OS could fail the `text == clip.tsv` comparison and silently downgrade to the external path — values instead of shifted formulas, the exact thing the bounce detection exists to prevent. Textual passes bracketed-paste text raw (only strips NULs — verified in `_xterm_parser.py`), so nothing upstream normalizes. Fix: `_normalize_paste` (CRLF/CR→LF, one trailing newline forgiven) applied to the *comparison only* — the external path keeps raw text (`splitlines` already handles any endings). The mirror is never CR-bearing by construction, so this only widens what we recognise as ourselves.
+
+**Fix 2 — extend-click: terminals EAT shift+click ("no amount of clicking" — Matthew).** The S34 resolution checked the wrong layer: `events.Click` exposes `.shift`, but emulators reserve Shift+mouse for native text selection and never forward it to apps in mouse mode (xterm convention; Windows Terminal confirmed in the field). The SGR protocol forwards Ctrl (bit 16) and Alt/meta (bit 8) — verified in textual's `parse_mouse_code`. Fix: extend-click accepts `shift | ctrl | meta`; **Ctrl+click is the practical gesture**, Alt+click the fallback, shift kept for terminals that do forward it. Pilot tests couldn't have caught this — they synthesize post-parser events, bypassing the terminal layer entirely. Lesson noted: anything mouse+modifier needs a field check, not just a Pilot check.
+
+**Landed:** grid.py (`_on_click` modifier set + docstrings), app.py (`_normalize_paste` + detection comment), test_selection.py (+1: ctrl- and alt-click extend), test_cut_os_bridge.py (+1: CRLF+trailing-newline bounce keeps formulas, multi-row), TUI README (key-table row reworded, ecosystem-truth note in the bridge bullet), design.md (field addendum on the click question). Suites: **TUI 128, core 816 untouched**, green.
+
+---
 ## 2026-06-07 — Session 34: Part 6 #4 — the TUI selection model
 
 **Context:** fresh session; task list rebuilt per the S33 handoff (① #4 selection ② #5 clipboard ③ #6 cut+OS bridge ④ #7 docs ⑤ Matthew pushes). Matthew committed `demo.csv` (c7e100a) — the S33 commit-or-delete question answered itself. Tree was clean at fdbb842/1e88762 + that.
