@@ -54,3 +54,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local-only insurance snapshot of Claude auto-memory — not for the public repo
+.memory-backup/
