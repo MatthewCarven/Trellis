@@ -906,18 +906,18 @@ This is the **second reference plugin**, and it proves a different extension sur
 
 ## Open questions
 
-- Save-point dirty integration: app remembers `depths` at save; undo/redo landing back on it clears dirty. Decide at #4.
-- Does the TUI need a visible hint that history dropped past the cap? Default: no (silent, like every editor).
+- ~~Save-point dirty integration: app remembers `depths` at save; undo/redo landing back on it clears dirty. Decide at #4.~~ **DECIDED at #4 (S35): not in v1.** Depth equality lies once steps drop off the cap (save at a full deque, write, redo back — same depths, different content), so the honest version needs drop-tracking. Undo writes mark dirty like any write; revisit only if the ● modified after undo-to-saved actually bothers anyone.
+- ~~Does the TUI need a visible hint that history dropped past the cap?~~ **DECIDED (S35): no** — silent, like every editor.
 
 ## Implementation breakdown
 
 | # | What lands | Where |
 |---|------------|-------|
 | 1 | This design pass | design.md Part 7 |
-| 2 | Scaffold: pyproject (no entry point, with the why-comment), README skeleton, contract docstrings | packages/trellis-undo/ |
-| 3 | `UndoLog` + `attach`/`detach`/`attach_workbook`: record/suppress/undo/redo/cap, hermetic engine-only tests | trellis_undo + tests |
-| 4 | TUI wiring: dependency, grid bindings + request messages, app handlers + status, venv scripts, Pilot tests | trellis-tui |
-| 5 | READMEs (undo + TUI key table + root), design rows closed, worklog | docs |
+| 2 | Scaffold: pyproject (no entry point, with the why-comment), README skeleton, contract docstrings — **DONE (S35)** | packages/trellis-undo/ |
+| 3 | `UndoLog` + `attach`/`detach`/`attach_workbook`: record/suppress/undo/redo/cap, hermetic engine-only tests (15) — **DONE (S35)** | trellis_undo + tests |
+| 4 | TUI wiring: dependency, grid bindings + request messages, app handlers + status, venv scripts, Pilot tests (7) — **DONE (S35)** | trellis-tui |
+| 5 | READMEs (undo + TUI key table + root), design rows closed, worklog — **DONE (S35). PART 7 COMPLETE.** | docs |
 
 ## References
 

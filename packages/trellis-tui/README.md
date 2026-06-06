@@ -12,9 +12,10 @@ The terminal frontend for [Trellis](../../README.md) — a [Textual](https://tex
 - Excel-ish editing: type to replace, `F2`/`Enter` to revise, commits move the cursor, and typed input gets the engine's conservative inference (`42` is a number, `01234` stays text — the same public `trellis.infer_value` rule CSV loading uses).
 - Formulas commit even when broken: the error value shows in the grid and `F2` hands your text back. Errors are values here.
 - CSV open/save **with formulas intact** — the TUI passes `formulas=True` to the engine's CSV I/O both ways, so `=SUM(A1:A2)` survives save and reopen as a live formula. (Want a values-only export for other tools? That's the engine default: `sheet.to_csv(path)` from a REPL.) Plus dirty tracking, a quit guard, and a status line that shows what recalculated and why (`recalc B1 ← A1`).
+- **Undo/redo** (Part 7): `Ctrl+Z` / `Ctrl+Y`, one step per gesture — an edit singly, a paste / selection-delete / file-load batch as one step. Backed by [trellis-undo](../trellis-undo), which the TUI depends on; the live log is `app.undo_log` (also `sheet.meta["undo"]`), the same object you'd drive from a REPL.
 - **Selection + clipboard, Excel-faithful where it counts** (Part 6): `Shift`+arrows extend (so does modifier+click — `Ctrl` or `Alt`, since terminals reserve `Shift`+mouse for native text selection), `Ctrl+A` selects the used range, the bar reads out `B2:D5 (3×4)`. Copy-paste **shifts relative references** by the paste offset (`=A1*2` copied down becomes `=A2*2`) and `$` pins opt out (`$A$1` stays put — the engine grew real absolute references for this); a reference pushed off the sheet edge lands as a literal `#REF!`, which the engine evaluates as the error it names. A single copied cell **fills** a selected range on paste. Cut is the pragmatic move: paste relocates verbatim and clears the source in the same batch (formulas *pointing at* the moved cells are not rewritten — documented deviation), and a pending cut disarms on Esc or any sheet change. The OS clipboard works **both ways**: copies mirror out as TSV (OSC 52), and pasting — from Excel, a browser, anywhere — arrives as text, every field committed exactly as if typed (so `=`-leading fields come in as live formulas). Your own copy bouncing back through the OS is recognized (line-ending mangling included) and keeps full fidelity. One ecosystem truth: the *plain-text* clipboard carries computed values, not formulas — that's what every spreadsheet (Excel and OpenOffice included) puts there, and the rich formats they use between themselves aren't speakable from a terminal. Formulas survive any Trellis→Trellis copy; cross-app transfers carry values.
 
-Deliberately **not** here yet (each with a reason in design.md): undo (a future plugin — the event payloads already carry everything it needs), inbound-reference rewriting on cut, fill handle, sheet tabs, themes, a TUI plugin API.
+Deliberately **not** here yet (each with a reason in design.md): inbound-reference rewriting on cut, save-point dirty tracking (undoing back to the saved state still shows ● modified), fill handle, sheet tabs, themes, a TUI plugin API.
 
 ## Install (development)
 
@@ -58,6 +59,8 @@ python -m trellis_tui  # same thing
 | `Ctrl+C` / `Ctrl+X` | copy / cut the selection (or cursor cell) | copy / cut text |
 | `Ctrl+V` (or any OS paste) | paste — fills from a single cell; external text commits as typed | paste text |
 | `Delete` (with a selection) | clear every selected cell (one undo-friendly batch) | — |
+| `Ctrl+Z` | undo (one gesture per step) | — |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | redo (dies on any new edit) | — |
 | `Ctrl+Home` | jump to A1 | — |
 | `Ctrl+S` | save CSV, formulas included (modal path prompt if pathless) | saves committed state |
 | `Ctrl+Q` | quit — warns once if unsaved | quit |
@@ -70,7 +73,7 @@ Hermetic, no install needed (`textual` and `pytest-asyncio` must be importable):
 
 ```
 cd packages/trellis-tui
-PYTHONPATH=../../src:src python -m pytest
+PYTHONPATH=../../src:src:../trellis-undo/src python -m pytest
 ```
 
-The suite is Pilot-based (headless Textual) plus pure unit tests for the display and commit policies — 126 tests as of Part 6. The display table in `tests/test_render.py` is the rendering spec; change it deliberately or not at all.
+The suite is Pilot-based (headless Textual) plus pure unit tests for the display and commit policies — 135 tests as of Part 7. The display table in `tests/test_render.py` is the rendering spec; change it deliberately or not at all.

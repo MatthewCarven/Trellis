@@ -11,7 +11,7 @@ The project's design philosophy is *open extensibility*. The core is small. Almo
 
 ## Status
 
-Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, a reference plugin ([trellis-mathpack](packages/trellis-mathpack)), and the terminal app ([trellis-tui](packages/trellis-tui), v1).
+Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, two reference plugins — [trellis-mathpack](packages/trellis-mathpack) (global registration via entry point) and [trellis-undo](packages/trellis-undo) (stateful attachment via events + meta) — and the terminal app ([trellis-tui](packages/trellis-tui), v1 + selection/clipboard/undo).
 
 ## Quick taste (library)
 
@@ -67,7 +67,7 @@ Three flavours of hook, depending on what you need.
 
 ### 2. Subscribe to events
 
-`Sheet` and `Workbook` are emitters. Handlers fire synchronously, in registration order, and exceptions propagate to the caller — no swallowing.
+`Sheet` and `Workbook` are emitters. Handlers fire synchronously, in registration order, and exceptions propagate to the caller — no swallowing. The change payloads carry the displaced and stored `Cell` objects, which is enough to build undo/redo from the outside: [trellis-undo](packages/trellis-undo) is exactly that — an `UndoLog` subscribing to `cell:change`/`sheet:batch` and stashing itself at `sheet.meta["undo"]`, zero core changes.
 
 ```python
 from trellis import Workbook
