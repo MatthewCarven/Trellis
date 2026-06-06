@@ -594,3 +594,19 @@ def test_detach_unsubscribes_both_change_and_batch():
     with sh.batch():
         sh["A1"] = 9
     assert sh["B1"].value == 2        # engine detached: no recompute via batch
+
+
+# --- $ pins are evaluation- and recalc-invisible (design.md Part 6) ----
+
+
+def test_pinned_refs_evaluate_and_recalc_like_plain_ones():
+    wb = Workbook()
+    sh = wb.add_sheet("S")
+    sh["A1"] = 21
+    sh["B1"] = "=$A$1*2"
+    sh["C1"] = "=SUM($A$1:A1)"
+    assert sh["B1"].value == 42
+    assert sh["C1"].value == 21
+    sh["A1"] = 50                  # pinned refs are the same dependency
+    assert sh["B1"].value == 100
+    assert sh["C1"].value == 50

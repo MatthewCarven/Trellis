@@ -391,3 +391,61 @@ def test_ast_nodes_are_hashable():
 
 def test_distinct_formulas_compare_unequal():
     assert parse_formula("A1+1") != parse_formula("A1+2")
+
+
+# --- Absolute-reference pins ($A$1 — design.md Part 6) ----------------
+
+
+@pytest.mark.parametrize(
+    "src,col_abs,row_abs",
+    [
+        ("B3", False, False),
+        ("$B3", True, False),
+        ("B$3", False, True),
+        ("$B$3", True, True),
+    ],
+)
+def test_pin_forms_set_the_flags(src, col_abs, row_abs):
+    assert parse_formula(src) == CellRef(2, 1, col_abs=col_abs, row_abs=row_abs)
+
+
+def test_plain_cellref_defaults_are_unpinned():
+    # Back-compat: CellRef(r, c) is the same value as an explicitly unpinned one.
+    assert CellRef(2, 1) == CellRef(2, 1, col_abs=False, row_abs=False)
+    assert parse_formula("B3") == CellRef(2, 1)
+
+
+def test_pins_evaluate_nowhere_but_compare_somewhere():
+    # Pinned and plain refs to the same cell are DIFFERENT AST values —
+    # rewriting tools must tell them apart.
+    assert parse_formula("$B$3") != parse_formula("B3")
+
+
+def test_range_corners_keep_their_own_pins():
+    ref = parse_formula("$A$1:B2")
+    assert ref == RangeRef(
+        CellRef(0, 0, col_abs=True, row_abs=True),
+        CellRef(1, 1),
+    )
+
+
+def test_swapped_range_corners_pins_travel_with_their_coordinates():
+    # B$2:$A1 normalises to $A1:B$2 — each pin stays with the row/col it pins.
+    ref = parse_formula("B$2:$A1")
+    assert ref == RangeRef(
+        CellRef(0, 0, col_abs=True, row_abs=False),
+        CellRef(1, 1, col_abs=False, row_abs=True),
+    )
+
+
+@pytest.mark.parametrize("src", ["$$A1", "A1$", "$1A", "$", "TRUE$"])
+def test_malformed_pins_are_parse_errors(src):
+    with pytest.raises(ParseError):
+        parse_formula(src)
+
+
+def test_dollar_in_function_name_parses_as_call():
+    # Lexer carries it, parser sees IDENT+LPAREN → a call; the unknown name
+    # becomes #NAME? at evaluation (errors-are-values), not a parse crash.
+    node = parse_formula("SU$M(1)")
+    assert node == FunctionCall("SU$M", (Number(1),))

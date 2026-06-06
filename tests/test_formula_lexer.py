@@ -269,3 +269,27 @@ def test_token_repr():
     assert "NUMBER" in r
     assert "42" in r
     assert "pos=0" in r
+
+
+# --- $ in identifiers (absolute-reference pins, design.md Part 6) ------
+
+
+def test_pinned_ref_is_one_ident_lexeme():
+    assert toks("$A$1") == [
+        (TokenKind.IDENT, "$A$1"),
+        (TokenKind.EOF, ""),
+    ]
+
+
+def test_pinned_ref_in_expression_keeps_stream_shape():
+    assert toks("$A1+1") == [
+        (TokenKind.IDENT, "$A1"),
+        (TokenKind.OP, "+"),
+        (TokenKind.NUMBER, 1),
+        (TokenKind.EOF, ""),
+    ]
+
+
+def test_bare_dollar_lexes_as_ident_for_the_parser_to_reject():
+    # Pin placement is the PARSER's job — the lexer just carries the lexeme.
+    assert toks("$") == [(TokenKind.IDENT, "$"), (TokenKind.EOF, "")]

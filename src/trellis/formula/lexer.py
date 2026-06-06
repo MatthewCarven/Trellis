@@ -126,11 +126,13 @@ def tokenize(src: str) -> Iterator[Token]:
                 raise ParseError(f"Bad number literal {text!r}", pos=start)
             continue
 
-        # Identifier: must start with a letter or underscore.
-        # The parser decides whether it's a cell ref, bool literal, or function name.
-        if ch.isalpha() or ch == "_":
+        # Identifier: starts with a letter, underscore, or ``$`` (absolute-
+        # reference pin — ``$A$1`` arrives as ONE ident lexeme; the parser
+        # validates pin placement). The parser decides whether it's a cell
+        # ref, bool literal, or function name.
+        if ch.isalpha() or ch == "_" or ch == "$":
             start = i
-            while i < n and (src[i].isalnum() or src[i] == "_"):
+            while i < n and (src[i].isalnum() or src[i] in "_$"):
                 i += 1
             yield Token(TokenKind.IDENT, src[start:i], start)
             continue

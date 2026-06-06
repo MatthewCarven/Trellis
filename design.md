@@ -834,7 +834,7 @@ In most terminals (Windows Terminal included) **Ctrl+V never reaches the app** â
 | # | What lands | Where |
 |---|------------|-------|
 | 1 | This design pass | design.md Part 6 |
-| 2 | `$` references: lexer + parser predicate + `CellRef` flags; evaluator/recalc indifference proven | core + tests |
+| 2 | `$` references: lexer + parser predicate + `CellRef` flags; evaluator/recalc indifference proven â€” **DONE (S33)** | core + tests |
 | 3 | Public `shift_formula` (token-splice; `#REF!` policy resolved; identity + pin + range + off-edge table) | core + re-exports + README bullet + tests |
 | 4 | Selection model: Shift+arrows, Ctrl+A, Esc, delta-paint, bar/status readout, Delete clears selection | grid.py + tests |
 | 5 | Internal clipboard: copy + paste (shift/fill/anchor), one-batch write path, dirty/echo riding it | app.py + tests |

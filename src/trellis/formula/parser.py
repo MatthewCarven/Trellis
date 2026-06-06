@@ -20,6 +20,11 @@ Precedence (lowest -> highest left-binding power):
 Cell-reference ranges (``A1:B5``) are not part of the precedence ladder —
 they are recognised when an IDENT that parses as a cell address is followed
 by a colon and another such IDENT.
+
+Absolute-reference pins (``$A$1``, ``$A1``, ``A$1``) are accepted anywhere a
+cell reference is; the ``$``s set ``CellRef.col_abs`` / ``row_abs`` and have
+no effect on evaluation (design.md Part 6 — they exist for rewriting tools).
+``trellis.core.address`` stays ``$``-free; pin knowledge lives here.
 """
 
 from __future__ import annotations
@@ -52,6 +57,30 @@ _INFIX_BP = {
 # Binding power used when parsing the operand of a unary +/-. Higher than any
 # infix lbp, so unary binds tighter than every binary operator.
 _PREFIX_BP = 70
+
+
+def _ref_parts(text: str) -> tuple[int, int, bool, bool]:
+    """Split an A1-style reference with optional ``$`` pins.
+
+    Returns ``(row, col, col_abs, row_abs)``. The ``$``-stripped body is
+    delegated to :func:`trellis.core.address.parse`, which stays ``$``-free —
+    pin knowledge lives in the formula layer (design.md Part 6). Raises
+    ``ValueError`` on anything that isn't a well-formed reference
+    (``$$A1``, ``A1$``, ``$1A``, a bare ``$``, ...).
+    """
+    col_abs = text.startswith("$")
+    body = text[1:] if col_abs else text
+    letters, dollar, digits = body.partition("$")
+    if dollar:
+        # The row pin must sit exactly between the letters and the digits.
+        if not letters or not digits or not letters.isalpha() or not digits.isdigit():
+            raise ValueError(f"malformed reference {text!r}")
+        row_abs = True
+        body = letters + digits
+    else:
+        row_abs = False
+    row, col = parse_addr(body)
+    return row, col, col_abs, row_abs
 
 
 class Parser:
@@ -169,13 +198,13 @@ class Parser:
         if upper == "FALSE":
             return Bool(False)
 
-        # Cell reference (A1-style); may be the start of a range.
+        # Cell reference (A1-style, optional $ pins); may start a range.
         try:
-            row, col = parse_addr(text)
+            row, col, col_abs, row_abs = _ref_parts(text)
         except ValueError:
             raise ParseError(f"Unknown identifier {text!r}", pos=ident_tok.pos)
 
-        start = CellRef(row, col)
+        start = CellRef(row, col, col_abs=col_abs, row_abs=row_abs)
 
         # Range? A1:B5 — only if next is COLON followed by another A1-ish IDENT.
         if self.peek().kind == TokenKind.COLON:
@@ -188,16 +217,27 @@ class Parser:
             self.advance()  # consume :
             end_tok = self.advance()
             try:
-                end_row, end_col = parse_addr(end_tok.value)
+                end_row, end_col, end_cabs, end_rabs = _ref_parts(end_tok.value)
             except ValueError:
                 raise ParseError(
                     f"Invalid cell reference {end_tok.value!r} in range",
                     pos=end_tok.pos,
                 )
-            end = CellRef(end_row, end_col)
+            end = CellRef(end_row, end_col, col_abs=end_cabs, row_abs=end_rabs)
             # Corner-normalise so start is top-left, end is bottom-right.
-            top = CellRef(min(start.row, end.row), min(start.col, end.col))
-            bot = CellRef(max(start.row, end.row), max(start.col, end.col))
+            # Pin flags travel WITH their coordinate: if the rows swap, their
+            # row-pins swap too — a pin belongs to the row/col it pins, not
+            # to the corner's position in the source text.
+            if start.row <= end.row:
+                top_row, top_rabs, bot_row, bot_rabs = start.row, start.row_abs, end.row, end.row_abs
+            else:
+                top_row, top_rabs, bot_row, bot_rabs = end.row, end.row_abs, start.row, start.row_abs
+            if start.col <= end.col:
+                left_col, left_cabs, right_col, right_cabs = start.col, start.col_abs, end.col, end.col_abs
+            else:
+                left_col, left_cabs, right_col, right_cabs = end.col, end.col_abs, start.col, start.col_abs
+            top = CellRef(top_row, left_col, col_abs=left_cabs, row_abs=top_rabs)
+            bot = CellRef(bot_row, right_col, col_abs=right_cabs, row_abs=bot_rabs)
             return RangeRef(top, bot)
 
         return start

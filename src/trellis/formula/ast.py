@@ -39,12 +39,20 @@ class Bool:
 class CellRef:
     """Reference to a single cell. Coordinates are zero-indexed.
 
+    ``col_abs`` / ``row_abs`` are the ``$`` pins (``$A$1``, ``$A1``, ``A$1``).
+    They are deliberately invisible to evaluation and recalc — ``=$A$1``
+    computes exactly like ``=A1``, and both are the same dependency (the
+    graph keys on ``(row, col)``). The flags exist for rewriting tools
+    (``shift_formula``, design.md Part 6), which shift only unpinned axes.
+
     No sheet attribute yet — cross-sheet references (``Sheet2!A1``) are out
     of scope for v1.
     """
 
     row: int
     col: int
+    col_abs: bool = False
+    row_abs: bool = False
 
 
 @dataclass(frozen=True)
