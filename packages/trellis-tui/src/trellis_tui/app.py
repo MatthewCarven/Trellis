@@ -11,6 +11,13 @@ message — messages persist until replaced; no timers, deterministic),
 ``Ctrl+S`` save with a modal path prompt when pathless (DECIDED #6:
 a modal, not a bar takeover — the cell editor's state machine stays
 single-purpose), and a ``Ctrl+Q`` dirty warning (press again to quit).
+
+Selection (Part 6 #4): the grid owns the rectangle and posts
+``SelectionChanged``; the app renders the ``B2:D5 (3×4)`` readout into
+the formula bar (the bar mirrors the cursor cell again on collapse) and
+executes selection-wide ``ClearRequest``s as ONE ``sheet.batch()`` of
+``commit_text`` deletes — still the single write path, one event echo,
+one dirty mark.
 """
 
 from __future__ import annotations
@@ -231,10 +238,38 @@ class TrellisApp(App):
         shutdown arrives after the bar unmounts) — query defensively.
         """
         bars = self.query(FormulaBar)
-        if bars and not bars.first().editing:
-            bars.first().show_cell(
-                self.sheet, (event.coordinate.row, event.coordinate.column)
-            )
+        if not bars or bars.first().editing:
+            return
+        grids = self.query(SheetGrid)
+        if grids and grids.first().selection_range is not None:
+            return  # SelectionChanged drives the bar while a selection is live
+        bars.first().show_cell(
+            self.sheet, (event.coordinate.row, event.coordinate.column)
+        )
+
+    # --------------------------------------------------------- selection
+
+    def on_sheet_grid_selection_changed(
+        self, message: SheetGrid.SelectionChanged
+    ) -> None:
+        """Render the selection readout (``B2:D5 (3×4)``) into the bar,
+        or hand the bar back to the cursor mirror on collapse."""
+        bars = self.query(FormulaBar)
+        if not bars or bars.first().editing:
+            return
+        grid = self.query_one(SheetGrid)
+        cursor = grid.cursor_coordinate
+        rect = message.rect
+        if rect is None or rect[0] == rect[1]:
+            # No selection (or a trivial 1×1): mirror the cell, Part 5 style.
+            bars.first().show_cell(self.sheet, (cursor.row, cursor.column))
+            return
+        (r0, c0), (r1, c1) = rect
+        readout = (
+            f"{to_a1(r0, c0)}:{to_a1(r1, c1)}"
+            f" ({r1 - r0 + 1}×{c1 - c0 + 1})"
+        )
+        bars.first().show_range(to_a1(cursor.row, cursor.column), readout)
 
     # ------------------------------------------------------ edit lifecycle
 
@@ -242,6 +277,17 @@ class TrellisApp(App):
         self._start_edit(message.mode, message.seed)
 
     def on_sheet_grid_clear_request(self, message: SheetGrid.ClearRequest) -> None:
+        if message.rect is not None:
+            # Delete with a live selection: every cell in the rectangle,
+            # in ONE batch — one event echo, one recalc pass, one dirty
+            # mark. (An all-empty rectangle emits nothing: the engine
+            # skips empty batches, so deleting nothing dirties nothing.)
+            (r0, c0), (r1, c1) = message.rect
+            with self.sheet.batch():
+                for row in range(r0, r1 + 1):
+                    for col in range(c0, c1 + 1):
+                        commit_text(self.sheet, (row, col), "")
+            return
         grid = self.query_one(SheetGrid)
         cursor = grid.cursor_coordinate
         commit_text(self.sheet, (cursor.row, cursor.column), "")  # delete

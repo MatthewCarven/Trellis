@@ -179,6 +179,18 @@ class FormulaBar(Horizontal):
         line.append(content)
         self.query_one("#fb-view", Static).update(line)
 
+    def show_range(self, cursor_a1: str, readout: str) -> None:
+        """Mirror a live selection (Part 6 #4): the ``B2:D5 (3\u00d74)``
+        readout replaces the cell mirror; the label keeps the cursor's
+        address. Plain ``show_cell`` resumes when the selection collapses.
+        """
+        self.shown = (cursor_a1, readout)
+        self.query_one("#fb-address", Label).update(cursor_a1)
+        line = Text()
+        line.append("\u2502 ", style="dim")
+        line.append(readout, style="bold")
+        self.query_one("#fb-view", Static).update(line)
+
     # edit mode ----------------------------------------------------------
 
     def start_edit(self, a1: str, prefill: str) -> None:

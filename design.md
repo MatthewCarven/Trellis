@@ -825,8 +825,8 @@ In most terminals (Windows Terminal included) **Ctrl+V never reaches the app** �
 ## Open questions
 
 - ~~Does the parser want `#REF!` (and friends) as first-class error *literals* in source text?~~ **RESOLVED at #3 (S33): yes.** One ERROR token kind (longest-match against the seven codes), one frozen `Error` AST node, evaluator resolves the code to its constant (minting unknowns, open-world). `=#REF!*2` parses, evaluates to `#REF!`, and propagates — a shifted-off-edge paste computes exactly like Excel's.
-- Shift+click to extend selection: do DataTable click events expose modifiers in textual 8.x? Check at #4.
-- Selection repaint threshold: reuse the grid's existing 256-cell rebuild threshold for selection restyles, or measure first? Default: reuse, retune by subclassing (the Part 5 class-attribute pattern).
+- ~~Shift+click to extend selection: do DataTable click events expose modifiers in textual 8.x?~~ **RESOLVED at #4 (S34): yes — included.** `events.Click` carries `.shift` (and `.style.meta` carries the cell's row/column), so `SheetGrid._on_click` pins the anchor before `DataTable` moves the cursor and the move arrives flagged as an extension. Plain clicks collapse via the plain-move path.
+- ~~Selection repaint threshold: reuse the grid's existing 256-cell rebuild threshold, or measure first?~~ **DECIDED at #4 (S34): reuse** `REBUILD_THRESHOLD`, retune by subclassing. The delta itself is enumerated in O(delta) (strip decomposition of the rect symmetric difference), so the threshold only gates the restyle-vs-rebuild choice.
 - TSV mirror fidelity: flattening embedded tabs/newlines is lossy for strings — acceptable for v1 OS interchange? (Internal clipboard is unaffected.)
 
 ## Implementation breakdown
@@ -836,7 +836,7 @@ In most terminals (Windows Terminal included) **Ctrl+V never reaches the app** �
 | 1 | This design pass | design.md Part 6 |
 | 2 | `$` references: lexer + parser predicate + `CellRef` flags; evaluator/recalc indifference proven — **DONE (S33)** | core + tests |
 | 3 | Public `shift_formula` (token-splice; `#REF!` policy resolved; identity + pin + range + off-edge table) — **DONE (S33)** | core + re-exports + README bullet + tests |
-| 4 | Selection model: Shift+arrows, Ctrl+A, Esc, delta-paint, bar/status readout, Delete clears selection | grid.py + tests |
+| 4 | Selection model: Shift+arrows, shift+click, Ctrl+A, Esc, delta-paint, bar readout, Delete clears selection — **DONE (S34)** | grid.py + app/editor + tests |
 | 5 | Internal clipboard: copy + paste (shift/fill/anchor), one-batch write path, dirty/echo riding it | app.py + tests |
 | 6 | Cut (pragmatic move) + OS bridge: TSV mirror out, `Paste`-event in with own-TSV detection, external inference | app.py + tests |
 | 7 | READMEs (key table + features), design.md rows closed, worklog | docs |
