@@ -595,4 +595,153 @@ Each implementation task lands as a self-contained chunk with its tests, per the
 
 ## References
 
-- `docs/plugin-example.md` — "Shipping a plugin as an installable package" (the COSH/SINH worked example this
+- `docs/plugin-example.md` — "Shipping a plugin as an installable package" (the COSH/SINH worked example this package realises).
+
+---
+
+# Part 5: `trellis-tui` — the terminal frontend (next milestone)
+
+Status: **scope, written 2026-06-06 Session 32.** No package code yet — this is the plan. Decisions confirmed with Matthew this session: **v1 is a usable editor** (grid + navigation + cell editing + formula bar + CSV open/save), **Excel-ish keybindings**, **no TUI plugin API yet** (hardcode first, extract hooks when real patterns emerge), **single visible sheet**.
+
+## Purpose
+
+Build `packages/trellis-tui/` — the [Textual](https://textual.textualize.io/)-based terminal spreadsheet application the README has promised since day one. Three jobs:
+
+1. **Clear the "is this a usable spreadsheet?" bar.** Everything so far is engine. This is the first thing a human can sit in front of and *use*.
+2. **Be the first real renderer.** Part 3 ("pre-render engine prep") hardened the event payloads, `Sheet.batch()`, and `used_range()` *specifically for this consumer*. The TUI is where that investment pays out — or where its gaps surface.
+3. **Prove "library first, app second" for real.** The TUI is a *frontend*, not a plugin (decision 2026-06-05, recorded in CLAUDE.md): it imports `trellis` and drives it from the outside; core never learns it exists. Where mathpack proved the *extension* surface (a plugin reaching in), the TUI proves the *embedding* surface (an application wrapping around). Same rule as Part 4: if the TUI needs a core internal, that's a core public-surface bug — fix it in core.
+
+## Design goals
+
+1. **One-way coupling, enforced by packaging.** `trellis-tui` depends on `trellis` + `textual`; nothing under `src/trellis/` imports, names, or special-cases the TUI. The `textual` dependency lives in the TUI package's pyproject only — core stays `dependencies = []`.
+2. **The engine is the model — no shadow data.** The app holds a real `Workbook`/`Sheet`, the same objects a REPL would. The grid widget's displayed strings are a render cache, never an authority. All reads via public API (`cell.value`, `cell.formula`, `used_range()`); all writes via `sheet[a1] = ...` / `sheet.delete(...)` — the leading-`=` formula sugar comes free, and the TUI never parses formulas itself.
+3. **One repaint path: the event echo.** The TUI repaints *only* in response to engine events (`cell:change`, `cell:recalc`, `sheet:batch`) — including for its own edits. A TUI-initiated write goes to the engine and the grid updates when the event comes back, identically to a recalc cascade or a plugin's write. No second "I just wrote this, patch the widget directly" path to drift out of sync.
+4. **Excel-ish, immediately familiar.** Arrows move, typing replaces, F2 revises, Enter commits-and-moves-down, Esc cancels. The target user lives in CSV/Excel; the TUI should feel like that, not like a modal editor.
+5. **Small v1, honest deferrals.** Single sheet, no selection ranges, no clipboard, no undo, no TUI plugin API. Each deferral is listed below with a reason and a revisit trigger.
+
+## Package layout
+
+```
+packages/trellis-tui/
+  pyproject.toml
+  README.md
+  src/
+    trellis_tui/
+      __init__.py          # __version__, re-export TrellisApp
+      app.py               # TrellisApp (textual.App): bindings, CSV open/save, main()
+      grid.py              # SheetGrid: DataTable-backed grid + engine-event subscriptions
+      editor.py            # formula bar + edit-mode state machine (nav vs edit)
+      render.py            # value -> display text policy (pure functions, no textual import)
+  tests/
+    test_render.py         # pure unit tests, no TUI needed
+    test_grid_sync.py      # event -> repaint (Textual Pilot, headless)
+    test_editing.py        # keybinding flows (Pilot)
+```
+
+Four modules, same "split only if unwieldy" rule as mathpack. `render.py` deliberately imports nothing from textual so the display policy is testable as plain functions.
+
+`pyproject.toml` essentials:
+
+```toml
+[project]
+name = "trellis-tui"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["trellis", "textual>=8"]   # 8.2.x current as of 2026-05; pin style = open question
+
+[project.scripts]
+trellis = "trellis_tui.app:main"
+```
+
+`trellis [file.csv]` is the whole CLI: open the file (via `read_csv`) or start with an empty one-sheet workbook.
+
+## The shape: MVC over a live engine
+
+- **Model** — a real `Workbook`; current sheet = first sheet (v1). Recalc, events, and plugins behave exactly as in a REPL — mathpack functions work in the TUI for free, a nice integration check.
+- **View** — `SheetGrid` wraps Textual's `DataTable` (cell-cursor mode): column headers `A B C…`, row labels `1 2 3…`, one materialized **window** = `used_range()` ∪ a minimum size, growing on demand as the cursor nears an edge. Above it a formula bar (address label + cell content); below it a status line (file path, dirty flag, transient messages).
+- **Controller** — bindings on the App. Two modes: **nav** (cursor on the grid; the bar mirrors the current cell — `formula` if set, else rendered value) and **edit** (focus in the bar's `Input`).
+
+The repaint loop — Part 3, cashed in:
+
+- `cell:change` / `cell:recalc` → if `address` is inside the window, render `new_value` and `update_cell_at` that one coordinate. Payloads carry `old_value`/`new_value`, so a no-op write can skip the repaint — the exact rationale 3.1 locked both in for. `cell:recalc`'s `trigger` feeds a status-line note ("recalc ← A1") nearly for free.
+- `sheet:batch` → walk `changes`; if the batch dwarfs the window (CSV load), rebuild the window once instead. `read_csv` already loads inside `batch()` (3.2), so file-open is one event, not ten thousand.
+- Handlers run synchronously inside the engine write, which happens inside a Textual key handler — same thread, no async gymnastics. A pathological recalc cascade means many `update_cell_at` calls in one handler; acceptable v1, coalescing is the documented escape hatch.
+- Dirty tracking is the same subscription: any `cell:change`/`sheet:batch` sets the flag, save clears it, `Ctrl+Q` warns once if set. The TUI dogfoods the event system exactly like a plugin would.
+
+## Interaction model (v1 keys)
+
+| Key | Nav mode | Edit mode |
+|-----|----------|-----------|
+| Arrows / PgUp / PgDn / Home / End | move cursor (DataTable native) | — (arrows edit text) |
+| `Ctrl+Home` | jump to A1 | — |
+| printable char | **replace-edit**: open bar empty, insert char | type |
+| `F2` | **revise-edit**: open bar with existing formula/value | — |
+| `Enter` | start revise-edit (lean — see open questions) | commit + move down |
+| `Tab` / `Shift+Tab` | — | commit + move right / left |
+| `Shift+Enter` | — | commit + move up |
+| `Esc` | — | cancel, restore bar |
+| `Delete` | clear cell (`sheet.delete`) | — |
+| `Ctrl+S` | save CSV (prompt for path if none) | — |
+| `Ctrl+Q` | quit (warn once if dirty) | — |
+
+Commit semantics: leading `=` → store the text as-is (the engine's formula sugar takes over); otherwise run the typed text through **value inference** (int → float → string; see the public-surface gap below) so typing `42` stores a number while `01234` stays a string — coherent with CSV load. Excel's commit-on-arrow-keys nuance in replace-edit is deferred polish.
+
+## Rendering policy (`render.py`)
+
+One pure function `display(value) -> (text, style_hints)` shared by grid and bar:
+
+- `None` → `""`; `str` → as-is (no quoting); `bool` → `TRUE`/`FALSE` (Excel-faithful); `int` → `str(x)`; `float` → repr-with-trimming (exact rule decided in #3 with table-driven tests). **No display-format system in v1** — number formats stay a future plugin story, per Part 3's do-NOT-pre-build list.
+- `FormulaError` → its code (`#DIV/0!`), styled distinct (red) — matches the CSV export policy.
+- Numbers right-aligned, text left-aligned (Rich `Text(justify=…)` per cell — one line, big legibility win).
+
+## Public-surface gap found by this pass
+
+**Typed input needs core's value-inference rule, and that rule is private.** The TUI receives text from an `Input`; storing `"42"` as a string would make `=SUM(...)` over typed data useless. The needed rule — int, then float, then string, with the leading-zero / whitespace / no-bool conservatisms — is exactly `trellis.io.csv._infer_value`, which is underscore-private. Duplicating it in the TUI would drift. Per the Part 4 rule, that's a core public-surface bug: **promote `_infer_value` to a public name** (e.g. `trellis.io.csv.infer_value`, re-exported as `trellis.infer_value`) — a ~5-line core diff + tests + README line, scheduled in #2. First confirmed case of the TUI exercising a gap shut, which is much of why this part exists.
+
+## Design decisions
+
+- **`DataTable`, not a custom grid widget.** Textual's DataTable gives virtualized rendering, a cell cursor, `update_cell_at`, and mouse support — 90% of a grid for free. Cost: the window is materialized into it, so a million-row sheet would materialize a million rows — out of scope; CSV-scale data is the stated use. Replacing `SheetGrid`'s internals with a custom virtualized widget later is invisible to the rest of the app; that's the escape hatch, taken only on proven need (`simplicity-over-clever-solvers`).
+- **Formula-bar-only editing in v1.** An in-cell floating `Input` overlay is the polished look but is absolute-positioning fiddliness over a DataTable; the bar is always visible, needs zero positioning code, and early-Excel users lived in it happily. In-cell overlay = deferred view-only upgrade.
+- **Console script is `trellis`.** The TUI owns the human-facing command; core remains import-only (it has no CLI today). Reversible pre-publish if core ever wants the name.
+- **Textual floor `>=8`** (8.2.x current, May 2026; supports py3.9–3.14, so the 3.10 sandbox can run the suite while the package declares 3.11+). Core's stale convenience extras (`tui = ["textual>=0.50"]`, `all = [...]`) get bumped in #2.
+- **Tests ride Textual's `Pilot`** (`App.run_test()`): headless, async, CI-friendly — press keys, assert grid + engine state. `render.py` tests stay textual-free.
+- **No `meta` writes in v1.** Column widths etc. are app state, not cell state. If the TUI ever persists per-cell UI state, it follows the plugin convention: one top-level `"trellis-tui"` key.
+
+## Explicitly NOT in v1 (deferred, with reasons)
+
+- **TUI plugin API** (panels, keymaps, commands) — confirmed hardcode-first (Matthew, 2026-06-06). Extract hooks once ≥2 concrete wants exist. First candidate already queued: a **vim keymap**.
+- **Selection ranges + clipboard** — needs a selection model first, and terminal clipboard is its own yak. Revisit right after v1; likely the most-missed feature.
+- **Undo/redo** — event payloads carry `old_*`/`new_*` precisely so an undo log can be an outside observer. Candidate *second reference plugin* rather than TUI code.
+- **Sheet tabs / multi-sheet UI** — single sheet confirmed for v1; `sheet:add/remove/rename` events are ready when tabs come.
+- **Column widths, frozen panes, in-cell edit overlay, themes** — view polish, post-v1.
+- **Conditional-formatting display** — the on-the-fence core question; whatever lands must be plugin-expressible. The TUI will eventually *read* style hints from `cell.meta`; it won't invent them.
+
+## Open questions
+
+- **Nav-mode `Enter`**: Excel moves down; Sheets starts an edit. Lean: revise-edit (Down already moves; a second move-down key is wasted). Decide in #5.
+- **Empty commit**: store `""` or `sheet.delete`? Lean: delete (Excel-faithful, keeps `used_range()` tight).
+- **Textual pin style**: `>=8` vs `>=8,<9` — majors break things; check 8.x churn at scaffold time.
+- **Window defaults**: minimum grid 26×100? grow-by increments? Decide in #4 by feel.
+- **Float display**: bare `repr` vs `%.10g`-style trimming. Decide in #3 with tests.
+- **Pathless `Ctrl+S` prompt**: in the formula bar vs a modal. Decide in #6.
+
+## Implementation breakdown (subtasks of this part)
+
+| Task ID | What | Notes |
+|---------|------|-------|
+| #1 | Write this scope (Part 5) | (this doc) |
+| #2 | Scaffold `packages/trellis-tui/` + core housekeeping | pyproject (`textual` dep, `trellis` script), src/tests skeleton, README skeleton; bump core's stale `tui`/`all` extras; **promote `_infer_value` → public** (+ tests, README line) |
+| #3 | `render.py` display policy | pure functions, table-driven unit tests; settle the float rule |
+| #4 | Read-only `SheetGrid` | window materialization (`used_range()` ∪ min, grow-on-demand), headers, cursor, formula-bar mirroring, event-driven repaint incl. `sheet:batch`; Pilot tests |
+| #5 | Editing | replace/revise edits, commit/cancel keys, typed-input inference, `Delete`, dirty flag; Pilot tests |
+| #6 | CSV open/save + app chrome | CLI-arg open, `Ctrl+S` (+ pathless prompt), status line, `Ctrl+Q` dirty warning; Pilot tests |
+| #7 | README + sign-off | TUI README (usage, key table, "frontend not plugin" note), root README status update, WORKLOG |
+
+Same rhythm as Part 4: each row lands as a self-contained chunk with its tests. #4 is the heart (the Part 3 surface, consumed); #5 makes it an editor; #6 makes it an app.
+
+## References
+
+- Part 3 of this doc — the event payloads, `batch()`, and `used_range()` this part consumes.
+- README "Extending" + `docs/plugin-example.md` — the contrast: mathpack extends from inside, the TUI embeds from outside.
+- Textual docs: [DataTable](https://textual.textualize.io/widgets/data_table/), [testing guide](https://textual.textualize.io/guide/testing/) (Pilot).
+- CLAUDE.md "Repository layout" — the 2026-06-05 in-repo companion-package decision.

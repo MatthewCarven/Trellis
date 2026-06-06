@@ -3,6 +3,26 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-06 — Session 32: Part 5 design pass — `trellis-tui` scope
+
+**Context:** new session; the session-scoped task list was empty again (same casualty as the move) — rebuilt as 4 tasks (#1 Part 5 design pass, #2 scaffold trellis-tui, #3 implement umbrella, #4 `.memory-backup/` fate). Noticed commit `41089c0` (untrack `.memory-backup/`, keep local-only) already landed after Session 31's worklog entry, so #4 was born resolved — closed it. Local `main` is ahead of the recorded publish point (`37ec605`); Matthew pushes from Windows.
+
+**What got done**
+- **design.md — appended Part 5: `trellis-tui` — the terminal frontend** (~170 lines, planning only; design.md now 747 lines / 5 parts). Decisions confirmed with Matthew up front: **usable-editor v1** (grid + navigation + cell editing + formula bar + CSV open/save), **Excel-ish keybindings**, **hardcode-first** (no TUI plugin API in v1; a vim keymap is queued as the first future extensibility proof), **single visible sheet**.
+- Scope highlights: MVC over a live engine (no shadow data model; DataTable-backed `SheetGrid` materializing `used_range()` ∪ a min window, grow-on-demand); **one repaint path** — the TUI repaints only via the engine's event echo (`cell:change`/`cell:recalc`/`sheet:batch`), including for its own writes — Part 3's payload lock-in cashed in (old/new for no-op skip, `trigger` for the status line, one `sheet:batch` per CSV load); formula-bar-only editing in v1; `render.py` as a pure, textual-free display-policy module; console script `trellis [file.csv]`; tests on Textual's headless Pilot; implementation table #1–#7 (#2 scaffold → #7 README/sign-off).
+
+**Public-surface gap found by the pass (the reason design passes exist)**
+- **Typed input needs core's value-inference rule, and it's private.** Typing `42` must store a number while `01234` stays a string — exactly `trellis.io.csv._infer_value`, underscore-private. Per the Part 4 rule ("a consumer needing an internal = core public-surface bug"), the fix is to **promote `_infer_value` to public** (`trellis.infer_value`), scheduled into Part 5 #2 rather than forking the rule into the TUI. Keeps "type 42" coherent with "load 42 from CSV".
+
+**Also discovered**
+- **design.md carried a committed EOF truncation scar**: the file ended mid-sentence inside Part 4's References ("…the COSH/SINH worked example this" — no trailing newline), present since at least `8e8ac48` and therefore public on GitHub. Almost certainly an old silent Write/Edit truncation (the exact failure mode the write-protocol memory exists for). Repaired with a minimal sentence close ("…this package realises)."); whatever further bullets existed are unrecoverable.
+- **Textual is at 8.2.x (May 2026), supporting py3.9–3.14.** Core's convenience extras (`tui = ["textual>=0.50"]`, `all`) are badly stale — bump scheduled in Part 5 #2. TUI floor lean `>=8`; pin style left as an open question. Bonus: the 3.10 sandbox can run Pilot tests (package still declares 3.11+).
+
+**Verified:** staged-in-/tmp + cp + sync + sha256 for both files (write protocol); `git diff` reviewed (append-only + the one-line EOF repair); 5 `# Part` headers present.
+
+**Next pick-up:** **Part 5 #2 — scaffold `packages/trellis-tui/`** (pyproject with `textual>=8` + `trellis` console script, src/tests skeleton, README skeleton) plus the two scheduled core touches: bump the stale `tui`/`all` extras and promote `_infer_value` → public with tests + README line. Then #3 render policy → #4 read-only grid.
+
+---
 ## 2026-06-06 — Session 31: post-move pickup — roadmap rebuilt + venv setup scripts
 
 **Context:** first session in the renamed/moved folder (`-=Programming=-\Trellis`). The move worked: memory-space link survived (all 10 memories recalled, no restore from `.memory-backup/` needed), git intact. Matthew cleaned up the stray `pytest-cache-files-*` dir. Casualty: the session-scoped task-list roadmap was empty.
