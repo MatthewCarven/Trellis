@@ -35,6 +35,7 @@ from .ast import (
     BinaryOp,
     Bool,
     CellRef,
+    Error,
     FunctionCall,
     Number,
     RangeRef,
@@ -139,6 +140,9 @@ class Parser:
 
         if tok.kind == TokenKind.STRING:
             return String(tok.value)
+
+        if tok.kind == TokenKind.ERROR:
+            return Error(tok.value)
 
         if tok.kind == TokenKind.LPAREN:
             expr = self.parse_expression()

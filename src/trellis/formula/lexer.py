@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Iterator
 
-from .errors import ParseError
+from .errors import _BY_CODE, ParseError
+
+# Error-literal codes, longest first so prefixes can't shadow (#N/A vs #NAME?).
+_ERROR_CODES = sorted(_BY_CODE, key=len, reverse=True)
 
 
 class TokenKind(Enum):
@@ -21,6 +24,7 @@ class TokenKind(Enum):
     STRING = "string"    # str in Token.value (unquoted, escapes resolved)
     IDENT = "ident"      # cell ref, function name, or bool literal — parser decides
     OP = "op"            # arithmetic, comparison, %, &, =
+    ERROR = "error"      # error literal: #REF!, #DIV/0!, ... (code str in value)
     LPAREN = "lparen"
     RPAREN = "rparen"
     COMMA = "comma"
@@ -163,6 +167,19 @@ def tokenize(src: str) -> Iterator[Token]:
         if ch in _SIMPLE_OPS:
             yield Token(TokenKind.OP, ch, i)
             i += 1
+            continue
+
+        # Error literal: one of the known codes, verbatim (uppercase).
+        # ``=#REF!*2`` is real source — pasting a formula off the sheet
+        # edge produces it (shift_formula, design.md Part 6).
+        if ch == "#":
+            for code in _ERROR_CODES:
+                if src.startswith(code, i):
+                    yield Token(TokenKind.ERROR, code, i)
+                    i += len(code)
+                    break
+            else:
+                raise ParseError(f"Unknown error literal at {ch!r}", pos=i)
             continue
 
         raise ParseError(f"Unexpected character {ch!r}", pos=i)

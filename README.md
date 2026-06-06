@@ -97,6 +97,7 @@ Events emitted today:
 - `Sheet.used_range()` returns `((min_row, min_col), (max_row, max_col))` (zero-indexed, inclusive) over non-empty cells, or `None` for an empty sheet — what a renderer or exporter calls to find the extent it must walk.
 - `trellis.infer_value(text)` — the conservative text→value rule CSV loading uses (int → float → string; leading zeros, `+` signs, scientific notation stay strings). Public so a frontend can make typed input behave exactly like loaded data.
 - `read_csv(path, formulas=True)` / `sheet.to_csv(path, formulas=True)` — opt-in formula round-trip: `=`-cells load live and save as source text. The default stays values-only/literal-text — an untrusted CSV never smuggles in live formulas, and plain exports carry values other tools can use. The TUI opts in for its own files.
+- `trellis.shift_formula(text, rows, cols)` — rewrite the cell references in a formula string by a paste offset, Excel-style: `$` pins hold their axis (`$A$1` never moves), references shifted off the sheet edge become `#REF!` (a range collapses whole), and everything that doesn't move survives byte-for-byte. Error codes are first-class formula source (`=#REF!*2` parses and evaluates). What the TUI's copy-paste rides on; public so any tool can move formulas around.
 
 The `Emitter` mixin (and `Subscription` handle) are re-exported from `trellis` if you want pub/sub on your own classes — it's a drop-in mixin and doesn't require `super().__init__()`.
 

@@ -26,13 +26,14 @@ from .ast import (
     BinaryOp,
     Bool,
     CellRef,
+    Error,
     FunctionCall,
     Number,
     RangeRef,
     String,
     UnaryOp,
 )
-from .errors import DIV0, NAME, VALUE, FormulaError
+from .errors import DIV0, NAME, VALUE, FormulaError, _BY_CODE
 from .functions import get_function
 
 if TYPE_CHECKING:
@@ -82,6 +83,10 @@ def evaluate(node: Any, ctx: Context) -> Any:
         return node.value
     if isinstance(node, Bool):
         return node.value
+    if isinstance(node, Error):
+        # Resolve the literal back to its constant; mint if a plugin
+        # taught the parser a code core doesn't know (open-world rule).
+        return _BY_CODE.get(node.code, FormulaError(node.code))
     if isinstance(node, CellRef):
         return _eval_cellref(node, ctx)
     if isinstance(node, RangeRef):

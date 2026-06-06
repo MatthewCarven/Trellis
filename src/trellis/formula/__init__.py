@@ -25,6 +25,7 @@ from .functions import (
 )
 from .parser import parse_formula
 from .recalc import RecalcEngine
+from .shift import shift_formula
 
 # Import for side effects: registers the built-in functions (SUM, IF, ...)
 # in the function registry at package import time. Nothing from this
@@ -49,5 +50,6 @@ __all__ = [
     "parse_formula",
     "register_function",
     "registered_function_names",
+    "shift_formula",
     "unregister_function",
 ]

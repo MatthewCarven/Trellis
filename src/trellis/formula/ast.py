@@ -68,6 +68,18 @@ class RangeRef:
 
 
 @dataclass(frozen=True)
+class Error:
+    """A literal error value in source, e.g. the ``#REF!`` in ``=#REF!*2``.
+
+    Produced by ``shift_formula`` when a reference falls off the sheet edge,
+    and accepted anywhere a value is. Evaluates to the matching
+    :class:`~trellis.formula.errors.FormulaError` constant.
+    """
+
+    code: str
+
+
+@dataclass(frozen=True)
 class UnaryOp:
     """Unary operator: prefix ``-`` / ``+`` or postfix ``%`` (divide-by-100)."""
 
@@ -103,4 +115,4 @@ class FunctionCall:
     args: tuple
 
 
-Node = Union[Number, String, Bool, CellRef, RangeRef, UnaryOp, BinaryOp, FunctionCall]
+Node = Union[Number, String, Bool, Error, CellRef, RangeRef, UnaryOp, BinaryOp, FunctionCall]

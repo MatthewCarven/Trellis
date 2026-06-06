@@ -62,6 +62,12 @@ CIRC = FormulaError("#CIRC!", "Circular reference detected")
 NA = FormulaError("#N/A", "Value not available")
 NULL = FormulaError("#NULL!", "Empty intersection")
 
+# Code -> singleton lookup. The lexer scans error literals against these
+# exact code strings (``=#REF!*2`` is valid source — shift_formula emits it
+# when a reference falls off the sheet edge); the evaluator resolves the
+# code back to its constant.
+_BY_CODE = {e.code: e for e in (DIV0, VALUE, REF, NAME, CIRC, NA, NULL)}
+
 
 class ParseError(Exception):
     """Raised by the lexer/parser when source can't be parsed.
