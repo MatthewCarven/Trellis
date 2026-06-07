@@ -135,12 +135,16 @@ class Clipboard:
     ``source_anchor`` is the copied rectangle's top-left; formula
     shifting keys off it. ``mode`` is ``"copy"`` (cut lands at #6).
     ``tsv`` is the OS mirror built at copy time (#6 pushes it out).
+    ``sheet`` is the source sheet (Part 9 #5): pastes are sheet-agnostic
+    — offsets carry across tabs — but a cut must clear its source cells
+    on the sheet they actually live on.
     """
 
     cells: tuple
     mode: str
     source_anchor: tuple[int, int]
     tsv: str
+    sheet: Sheet | None = None
 
 
 class SheetView:
@@ -759,6 +763,7 @@ class TrellisApp(App):
             mode=mode,
             source_anchor=(r0, c0),
             tsv="\n".join(tsv_rows),
+            sheet=self.sheet,
         )
 
     @staticmethod
@@ -832,6 +837,13 @@ class TrellisApp(App):
         src = clip.cells
         sr, sc = clip.source_anchor
         moving = clip.mode == "cut"
+        # Cross-tab paste (Part 9 #5): targets land on the ACTIVE sheet;
+        # a cut clears its source cells on the sheet they came from. A
+        # same-sheet move is one batch as always; a cross-sheet move is
+        # one batch per sheet — per-sheet undo-honest (Ctrl+Z on the
+        # target un-pastes, on the source un-clears).
+        source_sheet = clip.sheet if clip.sheet is not None else self.sheet
+        cross = moving and source_sheet is not self.sheet
         with self.sheet.batch():
             if not moving and len(src) == 1 and len(src[0]) == 1:
                 formula, value = src[0][0]
@@ -852,7 +864,7 @@ class TrellisApp(App):
                         target = (t0r + r_off, t0c + c_off)
                         self._paste_cell(target, formula, value, dr, dc)
                         written.add(target)
-                if moving:
+                if moving and not cross:
                     for row in range(sr, sr + len(src)):
                         for col in range(sc, sc + len(src[0])):
                             if (row, col) not in written:
@@ -861,6 +873,13 @@ class TrellisApp(App):
                     (t0r, t0c),
                     (t0r + len(src) - 1, t0c + len(src[0]) - 1),
                 )
+        if cross:
+            # The source sheet's own batch: every source cell goes (the
+            # written-set exclusion is a same-sheet overlap concern).
+            with source_sheet.batch():
+                for row in range(sr, sr + len(src)):
+                    for col in range(sc, sc + len(src[0])):
+                        source_sheet.delete((row, col))
         if moving:
             # Re-pasting after a move re-stamps a copy (friendlier than
             # Excel's one-shot cut; deviation noted in design.md). The

@@ -367,3 +367,67 @@ def test_build_app_dedupes_stems_and_remembers_new_paths(tmp_path):
     assert [v.sheet.name for v in app.views] == ["data", "data-2"]
     assert app.views[1].path == str(p2)  # new-file flow, path remembered
     assert app.views[1].sheet.used_range() is None  # empty tab
+
+
+# -------------------------------------------- #5: the cross-tab clipboard
+
+
+async def test_copy_pastes_across_tabs_with_shifted_formulas():
+    app = _two_sheet_app()
+    async with app.run_test() as pilot:
+        alpha = app.views[0].sheet
+        alpha["A1"] = 10
+        alpha["B1"] = "=A1*2"
+        await pilot.pause()
+        app.views[0].dirty = False  # the setup writes dirtied alpha
+        app.views[0].grid.move_cursor(row=0, column=1)  # B1
+        await pilot.pause()
+        await pilot.press("ctrl+c")
+        await pilot.press("ctrl+pagedown")
+        await pilot.pause()
+        beta_grid = app.views[1].grid
+        beta_grid.move_cursor(row=1, column=1)  # B2: offset (+1, 0)
+        await pilot.pause()
+        await pilot.press("ctrl+v")
+        beta = app.views[1].sheet
+        assert beta["B2"].formula == "=A2*2"  # shifted, on the OTHER sheet
+        assert alpha["B1"].formula == "=A1*2"  # source untouched
+        assert app.views[1].dirty and not app.views[0].dirty
+
+
+async def test_cut_paste_across_tabs_clears_the_source_sheet():
+    app = _two_sheet_app()
+    async with app.run_test() as pilot:
+        alpha = app.views[0].sheet
+        alpha["A1"] = 7
+        await pilot.pause()
+        await pilot.press("ctrl+x")
+        await pilot.press("ctrl+pagedown")
+        await pilot.pause()
+        await pilot.press("ctrl+v")
+        beta = app.views[1].sheet
+        assert beta["A1"].value == 7  # moved here
+        assert alpha["A1"].value is None  # cleared THERE, not on beta
+        assert app.views[0].dirty and app.views[1].dirty  # both honest
+        # Per-sheet undo: beta's Ctrl+Z un-pastes, alpha's log un-clears.
+        assert app.views[1].undo_log.can_undo
+        assert app.views[0].undo_log.can_undo
+
+
+async def test_cross_sheet_cut_undo_restores_each_side():
+    app = _two_sheet_app()
+    async with app.run_test() as pilot:
+        alpha = app.views[0].sheet
+        alpha["A1"] = "=1+1"
+        await pilot.pause()
+        await pilot.press("ctrl+x", "ctrl+pagedown")
+        await pilot.pause()
+        await pilot.press("ctrl+v")
+        beta = app.views[1].sheet
+        assert beta["A1"].value == 2 and alpha["A1"].value is None
+        await pilot.press("ctrl+z")  # active = beta: un-paste
+        assert beta["A1"].value is None
+        await pilot.press("ctrl+pageup")
+        await pilot.pause()
+        await pilot.press("ctrl+z")  # alpha's own log: un-clear
+        assert alpha["A1"].value == 2 and alpha["A1"].formula == "=1+1"
