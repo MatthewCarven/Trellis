@@ -973,7 +973,7 @@ Engine additions: **none.** Fill is a frontend gesture over surface the engine a
 
 ## Open questions
 
-- Do Ctrl+D / Ctrl+R survive Windows Terminal to the app? They're plain C0 controls (0x04 / 0x12) with no emulator-reserved meaning in raw mode — expected clean, but the S35 lesson stands: **field check before the part closes.**
+- ~~Do Ctrl+D / Ctrl+R survive Windows Terminal to the app?~~ **RESOLVED (S36, same day): yes — field-verified by Matthew, "seems to work nicely."** Both keys arrive clean in Windows Terminal. Workflow note from the field: the gesture pairs with extend-click — Ctrl+click the far cell to set where the fill stops, then Ctrl+D/R fills exactly that rect (the Part 6 selection model and the fill semantics composing as designed).
 
 ## Implementation breakdown
 
@@ -983,7 +983,7 @@ Engine additions: **none.** Fill is a frontend gesture over surface the engine a
 | 2 | Grid: bindings + `FillRequest` message — **DONE (S36)** | grid.py |
 | 3 | App: `_fill` (source/target resolution, lanes, one batch, status) — **DONE (S36)** | app.py |
 | 4 | Tests: lanes/shift/pins, fill-from-neighbor, edge no-op, empty-clears, one-batch/one-undo-step, cut-disarm, editor isolation, selection survives (12) — **DONE (S36)** | tests/test_fill.py |
-| 5 | Docs: TUI README (features + 2 key rows + the formula-is-the-series note), root README terminal-taste line, design rows closed, worklog — **DONE (S36); field check pending** | docs |
+| 5 | Docs: TUI README (features + 2 key rows + the formula-is-the-series note), root README terminal-taste line, design rows closed, worklog — **DONE (S36). Field-verified same day — PART 8 COMPLETE.** | docs |
 
 ## References
 

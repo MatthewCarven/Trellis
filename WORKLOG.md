@@ -20,6 +20,8 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 **Open question pending the field check (the S35 lesson made it a rule):** do Ctrl+D / Ctrl+R survive Windows Terminal to the app? They're plain C0 controls (0x04/0x12), no emulator-reserved meaning in raw mode — expected clean, but **Part 8 closes field-verified or not at all.** Matthew: pull, `Ctrl+D` on a selection with a formula in the top row, `Ctrl+R`, a lone `Ctrl+D` under a cell, and `Ctrl+Z` to un-fill — then the part closes. NEXT per pull list after that: sheet tabs / vim keymap / xlsx.
 
+**Field-verified (same day, Matthew):** Ctrl+D and Ctrl+R both arrive through Windows Terminal and fill as designed — "seems to work nicely." His workflow note: set the fill's extent first — Ctrl+click the end cell to extend the selection there, then fill; the Part 6 extend-click and the fill semantics compose exactly as intended (tip added to the TUI README). **PART 8 CLOSES FIELD-VERIFIED.** He pushed through 3f23399 before testing — origin is current.
+
 ---
 ## 2026-06-07 — Session 35: field feedback on Part 6 — two terminal-reality fixes
 
