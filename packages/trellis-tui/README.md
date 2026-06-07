@@ -6,7 +6,7 @@ The terminal frontend for [Trellis](../../README.md) — a [Textual](https://tex
 
 ## Status
 
-**v1 complete** (design.md Part 5 #1–#7) plus **selection + clipboard** (Part 6) and **keyboard fill** (Part 8): an editable, CSV-backed terminal spreadsheet.
+**v1 complete** (design.md Part 5 #1–#7) plus **selection + clipboard** (Part 6), **keyboard fill** (Part 8), and **sheet tabs** (Part 9): an editable, CSV-backed, multi-sheet terminal spreadsheet.
 
 - A live grid over the engine: A1-anchored window that grows as you arrow into empty space; Excel-faithful rendering (`4.0` → `4`, `TRUE`/`FALSE` centered, errors as red `#DIV/0!` codes, float noise trimmed so `=0.1+0.2` shows `0.3`).
 - Excel-ish editing: type to replace, `F2`/`Enter` to revise, commits move the cursor, and typed input gets the engine's conservative inference (`42` is a number, `01234` stays text — the same public `trellis.infer_value` rule CSV loading uses).
@@ -14,9 +14,10 @@ The terminal frontend for [Trellis](../../README.md) — a [Textual](https://tex
 - CSV open/save **with formulas intact** — the TUI passes `formulas=True` to the engine's CSV I/O both ways, so `=SUM(A1:A2)` survives save and reopen as a live formula. (Want a values-only export for other tools? That's the engine default: `sheet.to_csv(path)` from a REPL.) Plus dirty tracking, a quit guard, and a status line that shows what recalculated and why (`recalc B1 ← A1`).
 - **Undo/redo** (Part 7): `Ctrl+Z` / `Ctrl+Y`, one step per gesture — an edit singly, a paste / selection-delete / file-load batch as one step. Backed by [trellis-undo](../trellis-undo), which the TUI depends on; the live log is `app.undo_log` (also `sheet.meta["undo"]`), the same object you'd drive from a REPL.
 - **Keyboard fill** (Part 8): `Ctrl+D` fills down, `Ctrl+R` fills right — within the selection from its first row/column, or with no selection from the cell above/left, Excel-exact. Formulas shift per lane (`$` pins hold), values copy, empty sources clear; the whole fill is one batch and one undo step, and your clipboard is never touched. Field tip: `Ctrl`+click the cell you want the fill to *end* at (extending the selection there), then `Ctrl+D` — the selection is the fill's extent. No series extrapolation, on purpose: put `=A1+1` below a value and fill down — **the formula IS the series** (and recalc keeps it honest where a pasted 1,2,3 would go stale).
+- **Sheet tabs — a sheet is a file** (Part 9): CSV is a single-sheet format, so tabs are an editor's open buffers, not Excel's workbook-in-one-file. `trellis sales.csv costs.csv` opens two tabs (named for the file stems); each tab has its own path, its own dirty marker (a ● on the tab), and its own undo history. `Ctrl+S` saves the **active** sheet; `Ctrl+Q` warns once about every unsaved one. `Ctrl+PgUp`/`Ctrl+PgDn` (or click) switch, `Ctrl+T` adds a pathless sheet, `Ctrl+W` closes (warns once if unsaved), `Alt+R` or double-clicking the tab renames the *sheet* — never the file. The clipboard crosses tabs: copy here, paste there, formulas shifting as usual; a cut-paste across tabs clears the source cells on the sheet they came from, one undo step per side. Cross-sheet *references* (`=Sheet2!A1`) don't exist yet — formulas are sheet-local (deferred, with reasons, in design.md).
 - **Selection + clipboard, Excel-faithful where it counts** (Part 6): `Shift`+arrows extend (so does modifier+click — `Ctrl` or `Alt`, since terminals reserve `Shift`+mouse for native text selection), `Ctrl+A` selects the used range, the bar reads out `B2:D5 (3×4)`. Copy-paste **shifts relative references** by the paste offset (`=A1*2` copied down becomes `=A2*2`) and `$` pins opt out (`$A$1` stays put — the engine grew real absolute references for this); a reference pushed off the sheet edge lands as a literal `#REF!`, which the engine evaluates as the error it names. A single copied cell **fills** a selected range on paste. Cut is the pragmatic move: paste relocates verbatim and clears the source in the same batch (formulas *pointing at* the moved cells are not rewritten — documented deviation), and a pending cut disarms on Esc or any sheet change. The OS clipboard works **both ways**: copies mirror out as TSV (OSC 52), and pasting — from Excel, a browser, anywhere — arrives as text, every field committed exactly as if typed (so `=`-leading fields come in as live formulas). Your own copy bouncing back through the OS is recognized (line-ending mangling included) and keeps full fidelity. One ecosystem truth: the *plain-text* clipboard carries computed values, not formulas — that's what every spreadsheet (Excel and OpenOffice included) puts there, and the rich formats they use between themselves aren't speakable from a terminal. Formulas survive any Trellis→Trellis copy; cross-app transfers carry values.
 
-Deliberately **not** here yet (each with a reason in design.md): inbound-reference rewriting on cut, save-point dirty tracking (undoing back to the saved state still shows ● modified), mouse drag-fill and series fill (the keyboard fill + formulas cover both), sheet tabs, themes, a TUI plugin API.
+Deliberately **not** here yet (each with a reason in design.md): inbound-reference rewriting on cut, save-point dirty tracking (undoing back to the saved state still shows ● modified), mouse drag-fill and series fill (the keyboard fill + formulas cover both), cross-sheet references (sheet-local formulas only — the engine part when it comes), save-all (close/quit warnings cover the leak), themes, a TUI plugin API.
 
 ## Install (development)
 
@@ -62,6 +63,10 @@ python -m trellis_tui  # same thing
 | `Delete` (with a selection) | clear every selected cell (one undo-friendly batch) | — |
 | `Ctrl+D` | fill down — from the selection's first row, or the cell above | delete right |
 | `Ctrl+R` | fill right — from the selection's first column, or the cell to the left | — |
+| `Ctrl+PgDn` / `Ctrl+PgUp` | next / previous sheet (wraps) | same — switching is blocked with a hint |
+| `Ctrl+T` | new pathless sheet (`SheetN`) | — |
+| `Ctrl+W` | close the tab — unsaved warns once; the last tab refuses | delete word left |
+| `Alt+R` / double-click tab | rename the sheet (modal) | — |
 | `Ctrl+Z` | undo (one gesture per step) | — |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | redo (dies on any new edit) | — |
 | `Ctrl+Home` | jump to A1 | — |
@@ -79,4 +84,4 @@ cd packages/trellis-tui
 PYTHONPATH=../../src:src:../trellis-undo/src python -m pytest
 ```
 
-The suite is Pilot-based (headless Textual) plus pure unit tests for the display and commit policies — 147 tests as of Part 8. The display table in `tests/test_render.py` is the rendering spec; change it deliberately or not at all.
+The suite is Pilot-based (headless Textual) plus pure unit tests for the display and commit policies — 175 tests as of Part 9. The display table in `tests/test_render.py` is the rendering spec; change it deliberately or not at all.

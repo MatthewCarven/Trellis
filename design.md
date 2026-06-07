@@ -1057,19 +1057,19 @@ One `SheetGrid` per view inside a `ContentSwitcher` — grid-per-sheet keeps cur
 
 ## Open questions
 
-- Do `Ctrl+PgUp`/`Ctrl+PgDn` (CSI 5;5~/6;5~) and `Alt+R` arrive through Windows Terminal? Expected yes; **the part closes on the field check**, with click-the-tab as the every-terminal fallback.
-- Does a dirty marker in the tab *label* come cheap (textual `Tab.label` reactivity), or does it fight the widget? Resolve at #4; status bar carries dirty either way.
+- Do `Ctrl+PgUp`/`Ctrl+PgDn` (CSI 5;5~/6;5~) and `Alt+R` arrive through Windows Terminal? Expected yes; **the part closes on the field check**, with click-the-tab as the every-terminal fallback. *(Sandbox finding on the same keys, #3: textual's ScrollView binds ctrl+pageup/pagedown for horizontal paging, so the focused grid ate them — the switch bindings are `priority=True` on the app. A field check would have caught it; Pilot did this time.)*
+- ~~Does a dirty marker in the tab *label* come cheap (textual `Tab.label` reactivity), or does it fight the widget?~~ **RESOLVED at #4 (S36): cheap** — `Tab.label` is a plain settable property; the marker updates only on the dirty *flip* (no per-keystroke churn). Tabs show `name ●` while unsaved.
 
 ## Implementation breakdown
 
 | # | What lands | Where |
 |---|------------|-------|
 | 1 | This design pass | design.md Part 9 |
-| 2 | `SheetView` + per-sheet dirty/undo/subs; active-view properties; save/quit semantics over views (UI still single-tab) | app.py + tests |
-| 3 | `Tabs` + `ContentSwitcher` compose; switch gestures + click; `Ctrl+T` add; `Ctrl+W` close + warnings; bar/status/title wiring | app.py + tests |
-| 4 | Rename (modal + double-click + `Alt+R`); stem naming + dedupe; CLI multi-file `build_app`; label-dirty question | app.py + tests |
-| 5 | Clipboard `sheet` field; cross-tab paste + cut source-clear; disarm stays global | app.py + tests |
-| 6 | Docs: READMEs (key table + buffers-model note), design rows, worklog | docs |
+| 2 | `SheetView` + per-sheet dirty/undo/subs; active-view properties; save/quit semantics over views (UI still single-tab) — **DONE (S36, b934838)** | app.py + tests |
+| 3 | `Tabs` + `ContentSwitcher` compose; switch gestures + click; `Ctrl+T` add; `Ctrl+W` close + warnings; bar/status/title wiring — **DONE (S36, cd881b0)** | app.py + tests |
+| 4 | Rename (modal + double-click + `Alt+R`); stem naming + dedupe; CLI multi-file `build_app`; label-dirty question — **DONE (S36, e1362ed)** | app.py + tests |
+| 5 | Clipboard `sheet` field; cross-tab paste + cut source-clear; disarm stays global — **DONE (S36, 7613d8b)** | app.py + tests |
+| 6 | Docs: READMEs (key table + buffers-model note), design rows, worklog — **DONE (S36); field check pending** | docs |
 
 Rows #2–#5 each land green before the next starts — same rhythm as Part 6.
 
