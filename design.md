@@ -990,3 +990,93 @@ Engine additions: **none.** Fill is a frontend gesture over surface the engine a
 - Part 6 — `shift_formula` + `$` pins (6.B), `_paste_cell`'s transfer semantics, the request-message pattern, `REBUILD_THRESHOLD` repaint authority.
 - Part 7 — one-batch-one-step undo; fill inherits it untouched.
 - Excel parity notes: Ctrl+D/R fill from the selection's first row/column; single-cell Ctrl+D copies the cell above; Ctrl+D never does series.
+
+---
+
+# Part 9: Sheet tabs — the editor-buffers model
+
+## Purpose
+
+Multiple sheets in the TUI. The engine's `Workbook` has done multi-sheet from day one (ordered, evented add/remove/rename — the `sheet:add` docstring was written for consumers like this); Part 5 deliberately showed only the first sheet. This part is the UI seam — and, deliberately, **nothing else**: zero engine changes again.
+
+The shape is set by one decision: **a sheet is a file.** CSV is a single-sheet format and Matthew works in CSV ([CSV-only], by design), so tabs here are an *editor's open buffers*, not Excel's workbook-in-one-file: each tab is a CSV with its own path and its own dirty marker, `trellis sales.csv costs.csv` opens two tabs, and the engine `Workbook` is the session container (exactly what it is in a REPL).
+
+## Design goals
+
+- **Editor-buffers honesty.** Per-sheet path, per-sheet dirty, per-sheet undo. Ctrl+S saves *the active sheet*. Quit warns about *any* unsaved sheet. No invented workbook file format.
+- **Per-sheet view state survives switching.** Cursor, selection, scroll/window reach, undo history — leave a tab, come back, everything's where you left it.
+- **The clipboard crosses tabs.** Copy on one sheet, paste on another — the snapshot model already makes this safe; cut learns which sheet it came from.
+
+## Decisions confirmed up front (Matthew, 2026-06-08)
+
+1. **Sheet = file.** Each tab its own CSV + path + dirty flag; new sheets are pathless until the save prompt. Rejected: workbook-as-folder (saving writes files the user never named), manifest format (a new format other tools can't read).
+2. **v1 ops: add / switch / rename / close.** The full editor set, with close warning once on unsaved changes. Per-sheet dirty tracking comes with it.
+3. **Cross-sheet references deferred.** `=Sheet2!A1` is an engine part of its own (lexer `!`, parser, cross-sheet dependency graph) — and under sheet-=-file it's really a cross-*file* reference, which wants its own design pass. Tabs ship without it; formulas stay sheet-local.
+
+## TUI architecture
+
+### Per-sheet state: `SheetView`
+
+A plain holder the app keeps one of per tab: `sheet`, `path | None`, `dirty`, its `SheetGrid` (created with the view), its `UndoLog`, its event unsubscribers. The app owns `views: list[SheetView]` + `active_view`; **`app.sheet` / `app.path` / `app.dirty` / `app.undo_log` become properties over the active view** — every existing handler (and most existing tests) reads through unchanged. Dirty-marking subscribes per sheet at view creation; the 3.1 payload's `sheet` field routes the event to its view (cut-disarm stays global — conservative is safe). The recalc status note shows only for the active sheet.
+
+### Compose: `Tabs` over a `ContentSwitcher`
+
+One `SheetGrid` per view inside a `ContentSwitcher` — grid-per-sheet keeps cursor/selection/reach per tab for free, and the per-grid engine subscriptions already detach on unmount. Background grids receiving events is a non-issue without cross-sheet refs (nothing writes a background sheet except undo/REPL — and a hidden `update_cell_at` is cheap anyway). Tab label = sheet name (dirty stays in the status bar; label-marker only if it turns out cheap). The formula bar re-mirrors the incoming grid's cursor on switch; title/status show the active view's path.
+
+### Gestures (every one flagged for the field check — the S35 rule)
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+PgDn` / `Ctrl+PgUp` | next / previous sheet (Excel). CSI 5/6;5~ sequences — *should* arrive; **field check is the close gate** |
+| click a tab | switch (textual `Tabs` native) |
+| `Ctrl+T` | new pathless sheet, named `SheetN` (first free N) |
+| `Ctrl+W` | close active tab — dirty warns once, press again; the *last* tab refuses with a hint (quit is `Ctrl+Q`) |
+| double-click tab / `Alt+R` | rename the active sheet (modal, `SaveAsScreen` pattern; engine `rename_sheet` keeps order). Renames the *sheet*, never the file |
+
+**Mid-edit switching is a no-op + hint** (`finish the edit first`) in v1 — Excel commits-on-switch, but that couples the editor's Done flow to tab logic; upgrade only if the field misses it. App-level bindings, non-priority, with the editing guard in the handlers.
+
+### Open/save semantics
+
+- CLI: `trellis a.csv b.csv …` — one tab per file via `read_csv(…, workbook=wb)` (the `workbook=` parameter, finally consumed); sheet name = file stem (collisions dedupe `stem-2`); nonexistent paths stay the new-file flow, per file. No args = one empty `Sheet1`.
+- `Ctrl+S` saves the **active** sheet to its path (or prompts — `SaveAsScreen` unchanged); `saved sales.csv` names the file. Save-all deliberately absent until missed (close/quit warnings cover the leak).
+- `Ctrl+Q` warns once naming the count: `2 sheets unsaved — Ctrl+Q again quits`.
+- Constructor: `TrellisApp(workbook, path=…)` keeps meaning "the first sheet's path" (compat); `paths={name: path}` carries the multi-file case from `build_app`.
+
+### Clipboard across tabs
+
+`Clipboard` gains `sheet` (the source `Sheet`). Copy-paste cross-tab needs nothing else — offsets are sheet-agnostic and the payload is a snapshot. **Cut-paste onto another sheet**: targets write on the active sheet, source cells clear on `clip.sheet` — each in its *own* `sheet.batch()`, which is per-sheet undo-honest (Ctrl+Z on the target un-pastes; on the source, un-clears). Own-TSV bounce detection unchanged.
+
+## Rejected / deferred
+
+- **Cross-sheet references** — per decision 3; the engine part when it comes.
+- **Workbook-as-folder / manifest persistence** — per decision 1.
+- **Save-all gesture** — close/quit warnings already catch stray dirt; add only if the field asks.
+- **Commit-on-switch while editing** — Excel's behavior, deferred for the editor-coupling cost; hint instead.
+- **Tab reordering, colors, overflow scrolling** — textual `Tabs` scrolls on overflow already; the rest is decoration.
+- **Per-tab `App.sub_title` flicker games** — status bar is the single source of file truth, as in Part 5.
+
+## Open questions
+
+- Do `Ctrl+PgUp`/`Ctrl+PgDn` (CSI 5;5~/6;5~) and `Alt+R` arrive through Windows Terminal? Expected yes; **the part closes on the field check**, with click-the-tab as the every-terminal fallback.
+- Does a dirty marker in the tab *label* come cheap (textual `Tab.label` reactivity), or does it fight the widget? Resolve at #4; status bar carries dirty either way.
+
+## Implementation breakdown
+
+| # | What lands | Where |
+|---|------------|-------|
+| 1 | This design pass | design.md Part 9 |
+| 2 | `SheetView` + per-sheet dirty/undo/subs; active-view properties; save/quit semantics over views (UI still single-tab) | app.py + tests |
+| 3 | `Tabs` + `ContentSwitcher` compose; switch gestures + click; `Ctrl+T` add; `Ctrl+W` close + warnings; bar/status/title wiring | app.py + tests |
+| 4 | Rename (modal + double-click + `Alt+R`); stem naming + dedupe; CLI multi-file `build_app`; label-dirty question | app.py + tests |
+| 5 | Clipboard `sheet` field; cross-tab paste + cut source-clear; disarm stays global | app.py + tests |
+| 6 | Docs: READMEs (key table + buffers-model note), design rows, worklog | docs |
+
+Rows #2–#5 each land green before the next starts — same rhythm as Part 6.
+
+## References
+
+- `core/workbook.py` — ordered sheets, `sheet:add`/`remove`/`rename` events; the docstring that anticipated per-sheet attachment.
+- `io/csv.py` `read_csv(workbook=…)` — the multi-file loading seam, built in Part 3, consumed now.
+- Part 7 — per-sheet `UndoLog` attachment (`attach(sheet)` per view; `attach_workbook` is the REPL's spelling of the same).
+- Part 6 — `Clipboard` snapshot model (why cross-tab paste is safe), `_mark_dirty` disarm.
+- Textual: `Tabs`, `ContentSwitcher`, `Tab.label`.
