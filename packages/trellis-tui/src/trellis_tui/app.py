@@ -49,6 +49,16 @@ echo, dirty marks honestly (save-point tracking DECIDED against for
 v1 — depth equality lies near the history cap), and a pending cut
 disarms through the same ``_mark_dirty`` hook as always.
 
+Sheet tabs (Part 9, building): **a sheet is a file** — each tab is a
+``SheetView`` holding one engine sheet, its CSV path, its dirty flag,
+its grid, and its undo history (editor-buffers model; CSV is a
+single-sheet format, so the workbook is the *session*, exactly as in
+a REPL). ``app.sheet`` / ``app.path`` / ``app.dirty`` /
+``app.undo_log`` are properties over the active view, so every
+handler reads the sheet under the cursor. Dirty-marking routes by
+the event payload's ``sheet``; Ctrl+S saves the active sheet only;
+Ctrl+Q warns once about ALL unsaved sheets.
+
 Fill (Part 8): Ctrl+D / Ctrl+R fill the selection from its first
 row/column — or, single-lane, from the neighbor above/left (Excel's
 no-selection gesture). Per-lane transfer through the same
@@ -123,6 +133,23 @@ class Clipboard:
     tsv: str
 
 
+class SheetView:
+    """Per-tab state (Part 9): one sheet, its file, its history.
+
+    Plain and mutable on purpose — this is bookkeeping, not a value.
+    ``grid`` is created at compose/add time; ``undo_log`` and the
+    engine-event ``subs`` attach on app mount and detach on unmount.
+    """
+
+    def __init__(self, sheet: Sheet, path: str | None = None) -> None:
+        self.sheet = sheet
+        self.path = path
+        self.dirty = False
+        self.grid: SheetGrid | None = None
+        self.undo_log = None
+        self.subs: list = []
+
+
 class StatusBar(Static):
     """One line of app state: file · dirty marker · last message.
 
@@ -193,8 +220,8 @@ class TrellisApp(App):
     """The Trellis terminal spreadsheet.
 
     Holds a live engine ``Workbook`` — the same object a REPL would
-    drive. Single visible sheet in v1 (the workbook's first); the model
-    is the engine, the grid is a render cache of it.
+    drive. One ``SheetView`` per sheet (sheet = file, Part 9); the model
+    is the engine, the grids are render caches of it.
     """
 
     TITLE = "Trellis"
@@ -211,56 +238,117 @@ class TrellisApp(App):
         workbook: Workbook | None = None,
         *,
         path: str | None = None,
+        paths: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self.workbook = workbook if workbook is not None else _empty_workbook()
-        #: CSV path for Ctrl+S; ``None`` = pathless (modal prompt on save).
-        self.path = path
-        #: v1 shows the workbook's first sheet (single-sheet decision).
-        self.sheet: Sheet = next(iter(self.workbook.sheets()))
-        #: True once any engine write lands; cleared by a successful save.
-        self.dirty = False
+        sheets = list(self.workbook.sheets())
+        if not sheets:  # an empty Workbook still gets a sheet to stand on
+            sheets = [self.workbook.add_sheet("Sheet1")]
+        #: Per-sheet path map (Part 9, sheet = file). ``path`` stays the
+        #: single-file sugar: it names the FIRST sheet's file.
+        mapping = dict(paths or {})
+        if path is not None:
+            mapping.setdefault(sheets[0].name, path)
+        #: One SheetView per sheet, in workbook order. The first is active.
+        self.views: list[SheetView] = [
+            SheetView(sh, mapping.get(sh.name)) for sh in sheets
+        ]
+        self._active_index = 0
         self._edit_addr: tuple[int, int] | None = None
         self._edit_prefill: str | None = None  # set only for revise-edits
         self._quit_armed = False  # first dirty Ctrl+Q warns; second quits
-        self._subs: list = []
         #: The internal cells clipboard (None until the first copy).
         #: Named around textual's own App.clipboard property (the OS
         #: text mirror, which #6 feeds via copy_to_clipboard). Public —
         #: the same object a REPL poking at the app would want to see.
         self.sheet_clipboard: Clipboard | None = None
 
+    # ------------------------------------------------- active-view facade
+    #
+    # Part 9: the app is multi-sheet, but every gesture acts on the sheet
+    # under the cursor. These properties keep all handlers (and the REPL
+    # surface) reading/writing the ACTIVE view — app.sheet is "the sheet"
+    # exactly as before, it just follows the active tab now.
+
+    @property
+    def active_view(self) -> SheetView:
+        return self.views[self._active_index]
+
+    @property
+    def sheet(self) -> Sheet:
+        return self.active_view.sheet
+
+    @property
+    def path(self) -> str | None:
+        return self.active_view.path
+
+    @path.setter
+    def path(self, value: str | None) -> None:
+        self.active_view.path = value
+
+    @property
+    def dirty(self) -> bool:
+        return self.active_view.dirty
+
+    @dirty.setter
+    def dirty(self, value: bool) -> None:
+        self.active_view.dirty = value
+
+    @property
+    def undo_log(self):
+        return self.active_view.undo_log
+
+    def _view_for(self, sheet) -> SheetView | None:
+        for view in self.views:
+            if view.sheet is sheet:
+                return view
+        return None
+
     def compose(self) -> ComposeResult:
         yield Header()
         yield FormulaBar()
-        yield SheetGrid(self.sheet)
+        # UI is still single-tab at Part 9 #2: the active view's grid.
+        # #3 swaps this for Tabs + a ContentSwitcher of per-view grids.
+        view = self.active_view
+        view.grid = SheetGrid(view.sheet)
+        yield view.grid
         yield StatusBar()
         yield Footer()
 
     def on_mount(self) -> None:
         self.sub_title = self.path or "new workbook"
-        #: The sheet's undo history (also at ``sheet.meta["undo"]``).
-        #: Attached here, after any CSV load — opening a file is not an
-        #: undoable gesture (matching every editor).
-        self.undo_log = attach_undo(self.sheet)
+        # Per-view attachment (Part 9): every sheet gets its own undo
+        # history (also at ``sheet.meta["undo"]``) and its own dirty
+        # tracking — attached here, after any CSV load, because opening
+        # a file is not an undoable gesture (matching every editor).
+        # The recalc note rides the same events (derived state — never
+        # dirties); handlers route by the payload's ``sheet``.
+        for view in self.views:
+            self._attach_view(view)
         self.query_one(FormulaBar).show_cell(self.sheet, (0, 0))
-        # Dirty tracking + the recalc note ride the same engine events as
-        # the repaint loop (recalc is derived state — it never dirties).
-        self._subs = [
-            self.sheet.on("cell:change", self._mark_dirty),
-            self.sheet.on("sheet:batch", self._mark_dirty),
-            self.sheet.on("cell:recalc", self._note_recalc),
-        ]
         message = None
         if self.path and not Path(self.path).exists():
             message = "new file — Ctrl+S creates it"
         self._refresh_status(message)
 
     def on_unmount(self) -> None:
-        detach_undo(self.sheet)
-        for unsubscribe in self._subs:
+        for view in self.views:
+            self._detach_view(view)
+
+    def _attach_view(self, view: SheetView) -> None:
+        view.undo_log = attach_undo(view.sheet)
+        view.subs = [
+            view.sheet.on("cell:change", self._mark_dirty),
+            view.sheet.on("sheet:batch", self._mark_dirty),
+            view.sheet.on("cell:recalc", self._note_recalc),
+        ]
+
+    def _detach_view(self, view: SheetView) -> None:
+        detach_undo(view.sheet)
+        for unsubscribe in view.subs:
             unsubscribe()
-        self._subs = []
+        view.subs = []
 
     # --------------------------------------------------------- app state
 
@@ -270,7 +358,9 @@ class TrellisApp(App):
             bars.first().show(self.path, self.dirty, message)
 
     def _mark_dirty(self, **ev: object) -> None:
-        self.dirty = True
+        view = self._view_for(ev.get("sheet"))
+        if view is not None:
+            view.dirty = True  # the changed sheet's view, not necessarily active
         self._quit_armed = False  # new changes re-arm the quit warning
         clip = self.sheet_clipboard
         if clip is not None and clip.mode == "cut":
@@ -284,6 +374,8 @@ class TrellisApp(App):
         self._refresh_status()
 
     def _note_recalc(self, **ev) -> None:
+        if ev.get("sheet") is not self.sheet:
+            return  # a background tab recalculating is not status news
         address, trigger = ev["address"], ev["trigger"]
         note = f"recalc {to_a1(*address)}"
         if trigger is not None and tuple(trigger) != tuple(address):
@@ -321,9 +413,18 @@ class TrellisApp(App):
     # ------------------------------------------------------------- quit
 
     async def action_quit(self) -> None:
-        if self.dirty and not self._quit_armed:
+        unsaved = sum(1 for view in self.views if view.dirty)
+        if unsaved and not self._quit_armed:
             self._quit_armed = True
-            self._refresh_status("unsaved changes — Ctrl+S to save, Ctrl+Q again to quit")
+            if unsaved == 1 and self.dirty:
+                message = "unsaved changes — Ctrl+S to save, Ctrl+Q again to quit"
+            else:
+                noun = "sheet" if unsaved == 1 else "sheets"
+                message = (
+                    f"{unsaved} {noun} unsaved — Ctrl+S saves the active one,"
+                    " Ctrl+Q again quits"
+                )
+            self._refresh_status(message)
             return
         self.exit()
 
