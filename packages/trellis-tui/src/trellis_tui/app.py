@@ -48,6 +48,15 @@ their batch). Undo writes are engine writes: the grid repaints via the
 echo, dirty marks honestly (save-point tracking DECIDED against for
 v1 — depth equality lies near the history cap), and a pending cut
 disarms through the same ``_mark_dirty`` hook as always.
+
+Fill (Part 8): Ctrl+D / Ctrl+R fill the selection from its first
+row/column — or, single-lane, from the neighbor above/left (Excel's
+no-selection gesture). Per-lane transfer through the same
+``_paste_cell`` helper as paste (formulas shift, ``$`` pins hold,
+empty sources clear their targets), all ONE batch — one echo, one
+dirty mark, one undo step. No clipboard involvement: a fill never
+disturbs copied cells or a pending cut's snapshot (though the cut
+disarms, as on any engine change).
 """
 
 from __future__ import annotations
@@ -503,7 +512,8 @@ class TrellisApp(App):
     def _paste_cell(
         self, address: tuple[int, int], formula, value, dr: int, dc: int
     ) -> None:
-        """Write one pasted cell. Formulas shift (off-edge refs become
+        """Write one transferred cell (paste and fill both route here).
+        Formulas shift (off-edge refs become
         ``#REF!`` literals — errors-are-values, the cell still commits);
         raw values write verbatim; empty source cells clear the target."""
         if formula is not None:
@@ -517,6 +527,50 @@ class TrellisApp(App):
             self.sheet.set(address, Cell(value=value))
         else:
             self.sheet.set(address, value)
+
+    # --------------------------------------------------------------- fill
+
+    def on_sheet_grid_fill_request(self, message: SheetGrid.FillRequest) -> None:
+        self._fill(message.rect, message.axis)
+
+    def _fill(self, rect, axis: str) -> None:
+        """Ctrl+D / Ctrl+R (Part 8): fill ``rect`` along ``axis``, ONE batch.
+
+        A 2+-lane rect fills from its own first row/column (Excel: the
+        source lane stays put, only the rest is written); a single-lane
+        rect fills from the neighbor above/left — Excel's no-selection
+        gesture — and at the sheet edge there is nothing to fill from.
+        Lanes transfer independently through ``_paste_cell``: formulas
+        shift by each target's offset from ITS lane's source (``$``
+        pins hold, off-edge refs land as ``#REF!``), values copy at
+        full fidelity, empty sources clear their targets. One batch =
+        one echo, one dirty mark, one undo step; an all-empty fill
+        emits nothing (delete-of-absent is silent, the engine skips
+        empty batches) so it cannot dirty the sheet.
+        """
+        (r0, c0), (r1, c1) = rect
+        down = axis == "down"
+        lo, hi = (r0, r1) if down else (c0, c1)
+        if hi > lo:
+            src, first = lo, lo + 1  # source lane sits inside the rect
+        elif lo == 0:
+            self._refresh_status(
+                f"nothing {'above' if down else 'left'} to fill from"
+            )
+            return
+        else:
+            src, first = lo - 1, lo  # the neighbor above/left
+        lanes = range(c0, c1 + 1) if down else range(r0, r1 + 1)
+        with self.sheet.batch():
+            for lane in lanes:
+                addr = (src, lane) if down else (lane, src)
+                cell = self.sheet[to_a1(*addr)]
+                for t in range(first, hi + 1):
+                    target = (t, lane) if down else (lane, t)
+                    dr, dc = (t - src, 0) if down else (0, t - src)
+                    self._paste_cell(target, cell.formula, cell.value, dr, dc)
+        extent = ((first, c0), (r1, c1)) if down else ((r0, first), (r1, c1))
+        self._refresh_status(f"filled {axis} {self._rect_label(extent)}")
 
     def on_paste(self, event: events.Paste) -> None:
         """The terminal Paste event — how Ctrl+V actually arrives in

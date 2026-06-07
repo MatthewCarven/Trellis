@@ -1,4 +1,4 @@
-"""SheetGrid — the DataTable-backed grid view (design.md Part 5 #4, Part 6 #4).
+"""SheetGrid — the DataTable-backed grid view (Parts 5 #4, 6 #4, 8).
 
 The view half of the one-repaint-path contract:
 
@@ -186,6 +186,11 @@ class SheetGrid(DataTable):
         Binding("ctrl+z", "request_undo", "Undo", show=False),
         Binding("ctrl+y", "request_redo", "Redo", show=False),
         Binding("ctrl+shift+z", "request_redo", "Redo", show=False),
+        # Fill (Part 8). Excel's keyboard fill, grid-bound like the
+        # clipboard keys: while editing, Input's own ctrl+d (delete
+        # right) keeps working on text instead of touching the sheet.
+        Binding("ctrl+d", "request_fill('down')", "Fill down", show=False),
+        Binding("ctrl+r", "request_fill('right')", "Fill right", show=False),
     ]
 
     def __init__(self, sheet: Sheet, **kwargs: Any) -> None:
@@ -596,6 +601,24 @@ class SheetGrid(DataTable):
     def action_request_paste(self) -> None:
         self.post_message(
             self.PasteRequest(self.selection_range or self.cursor_rect())
+        )
+
+    # Fill intent (Part 8): the rect is the selection or the cursor 1×1,
+    # the clipboard-request shape. Source-vs-target resolution (first
+    # row/column of a 2+-lane rect; the neighbor above/left for a
+    # single-lane one) is the app's job — the grid stays semantics-free.
+
+    class FillRequest(Message):
+        """Fill ``rect`` along ``axis`` ("down" | "right") — Ctrl+D/R."""
+
+        def __init__(self, rect, axis: str) -> None:
+            self.rect = rect
+            self.axis = axis
+            super().__init__()
+
+    def action_request_fill(self, axis: str) -> None:
+        self.post_message(
+            self.FillRequest(self.selection_range or self.cursor_rect(), axis)
         )
 
     # Undo intents (Part 7 #4): no payload — the app owns the UndoLog.
