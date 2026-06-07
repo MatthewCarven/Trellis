@@ -11,7 +11,7 @@ The project's design philosophy is *open extensibility*. The core is small. Almo
 
 ## Status
 
-Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, two reference plugins — [trellis-mathpack](packages/trellis-mathpack) (global registration via entry point) and [trellis-undo](packages/trellis-undo) (stateful attachment via events + meta) — and the terminal app ([trellis-tui](packages/trellis-tui), v1 + selection/clipboard/undo).
+Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, two reference plugins — [trellis-mathpack](packages/trellis-mathpack) (global registration via entry point) and [trellis-undo](packages/trellis-undo) (stateful attachment via events + meta) — and the terminal app ([trellis-tui](packages/trellis-tui), v1 + selection/clipboard/undo/fill).
 
 ## Quick taste (library)
 
@@ -45,7 +45,7 @@ pip install -e . -e packages/trellis-tui
 trellis data.csv
 ```
 
-Arrow around, type to edit, `=SUM(A1:A3)` recalculates as you'd hope, `Ctrl+S` saves, `Ctrl+Q` quits. Select with `Shift`+arrows; copy-paste shifts relative references Excel-style (`$A$1` pins), cut moves, and the OS clipboard works both ways. Full key table and notes in [packages/trellis-tui/README.md](packages/trellis-tui/README.md). On Windows, run it inside Windows Terminal.
+Arrow around, type to edit, `=SUM(A1:A3)` recalculates as you'd hope, `Ctrl+S` saves, `Ctrl+Q` quits. Select with `Shift`+arrows; copy-paste shifts relative references Excel-style (`$A$1` pins), cut moves, the OS clipboard works both ways, and `Ctrl+D`/`Ctrl+R` fill down/right. Full key table and notes in [packages/trellis-tui/README.md](packages/trellis-tui/README.md). On Windows, run it inside Windows Terminal.
 
 ## Install
 

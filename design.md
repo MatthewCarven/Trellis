@@ -925,3 +925,68 @@ This is the **second reference plugin**, and it proves a different extension sur
 - Part 6 — `_mark_dirty`'s pending-cut demote (composes with undo writes unchanged).
 - `core/workbook.py` — the `sheet:add` docstring that anticipated `attach_workbook`.
 - mathpack — the *other* reference plugin: global registration via entry point, the style this one deliberately isn't.
+
+---
+
+# Part 8: Fill — Ctrl+D / Ctrl+R (keyboard fill)
+
+## Purpose
+
+The fill workflow: write `=B2*1.1` once, fill it down a hundred rows. Excel's drag handle is the famous gesture, but its keyboard half — **Ctrl+D fill down, Ctrl+R fill right** — is the one that fits a terminal, and it was named on the v2 pull list from the start ("`shift_formula` is the hard half of it anyway" — Part 6 called it, and that half is done and public).
+
+Engine additions: **none.** Fill is a frontend gesture over surface the engine already exports — the design test passes by construction (the REPL idiom is a two-line loop over `shift_formula`; see Rejected for why that loop doesn't get promoted into core).
+
+## Design goals
+
+- **Excel-faithful keys, Excel-faithful semantics.** Ctrl+D/R fill within the selection from its first row/column; with no selection they fill from the neighbor above/left. No clipboard involvement — your copied cells survive a fill.
+- **One gesture, one batch.** The whole fill is ONE `sheet.batch()` — one echo, one recalc, one dirty mark, one undo step (Part 7 composes for free).
+- **The grid still never writes the engine.** Fill is a request message; the app executes it through the same per-cell transfer helper paste already uses.
+
+## Decisions confirmed up front (Matthew, 2026-06-08)
+
+1. **Keyboard only.** Ctrl+D / Ctrl+R; the mouse drag handle is deferred — a one-character target in a character grid plus drag-protocol fragility across terminals (the S35 shift+click lesson generalizes: anything mouse+modifier needs a field check, and drags are worse). Revisit only if keyboard fill leaves muscle memory unsatisfied.
+2. **Single-row/no-selection = fill from the neighbor, Excel-exact.** Ctrl+D with no selection (or a selection only 1 row tall) copies the cell(s) *above* into the target row(s); Ctrl+R mirrors with the column to the left. At the sheet edge (cursor row 0 / col 0) there is nothing to fill from: status hint, no write.
+3. **Series fill deferred.** Excel's Ctrl+D never extrapolates anyway (only the drag handle does). The spreadsheet-native idiom: `=A1+1` below, fill down — **the formula IS the series.** Documented in the README; a series gesture lands only if it's ever actually missed (simplicity over clever solvers).
+
+## TUI architecture
+
+### Grid: the intent
+
+- Bindings `ctrl+d` / `ctrl+r` → `FillRequest(rect, axis)` with `axis` `"down"` | `"right"` and `rect` the live `selection_range` or the cursor 1×1 — the ClearRequest shape. Conflict check (textual 8.2.7): DataTable and App bind neither key; `Input` binds Ctrl+D (delete-right) for its *own* text editing, which is exactly the isolation the clipboard/undo keys already rely on — grid-bound means nav-only, and while editing the editor keeps its native behavior (regression-tested like undo's).
+
+### App: the execution
+
+`_fill(rect, axis)` — all writes inside ONE `sheet.batch()`:
+
+- **Resolve source vs targets.** `axis="down"`: selection 2+ rows tall → source = its first row, targets = the rows below it (Excel: source stays put, only targets are written). Selection 1 row tall → source = the row *above* the rect (off-sheet → status `nothing above to fill from`, no batch). `axis="right"` mirrors with columns.
+- **Per-cell transfer, per-lane source.** Each target column (down) / row (right) is an independent lane: target `(r, c)` receives the source cell of *its own* lane shifted by its own offset — `_paste_cell(target, formula, value, dr, dc)` verbatim, the same helper paste uses: formulas through `shift_formula` (`$` pins hold, off-edge refs land as `#REF!` literals), raw values copy at full fidelity, **empty source cells clear their targets** (Excel-faithful), `=`-string values take the prebuilt-`Cell` verbatim path.
+- **Status:** `filled down B3:D7` / `filled right C2:F4` — the written extent, `_rect_label` style.
+- **What composes for free** (the Part 3/6/7 machinery cashing in again): one batch = one undo step (Ctrl+Z un-fills whole); `_mark_dirty` disarms a pending cut; the selection survives (fill doesn't move the cursor — Excel-faithful); repaint rides the batch echo; out-of-window writes can't happen (targets ⊆ selection ⊆ window; the fill-from-neighbor row sits inside it by construction).
+
+## Rejected / deferred
+
+- **Mouse drag handle** — deferred per decision 1 (terminal drag fragility; the keyboard covers the workflow).
+- **Series/auto-fill extrapolation** — deferred per decision 3; the formula idiom covers it honestly.
+- **`trellis.fill()` engine helper** — fill would be the first core API that takes a rectangle and writes cells: that's a frontend's job description, not a library primitive's. The engine's contribution is `shift_formula` (already public); the REPL user's fill is `for r in range(2, 100): sheet.set((r, 1), shift_formula(src, r - 1, 0))`. Promote only if a second frontend duplicates the loop.
+- **Ctrl+U / Ctrl+L fill up/left** — not Excel (those are font keys there); no muscle memory to honor. The rare upward fill is a copy-paste away.
+- **Fill-into-empty-only / skip-blanks modes** — option-dialog territory; nothing in the daily workflow asks for it.
+
+## Open questions
+
+- Do Ctrl+D / Ctrl+R survive Windows Terminal to the app? They're plain C0 controls (0x04 / 0x12) with no emulator-reserved meaning in raw mode — expected clean, but the S35 lesson stands: **field check before the part closes.**
+
+## Implementation breakdown
+
+| # | What lands | Where |
+|---|------------|-------|
+| 1 | This design pass | design.md Part 8 |
+| 2 | Grid: bindings + `FillRequest` message — **DONE (S36)** | grid.py |
+| 3 | App: `_fill` (source/target resolution, lanes, one batch, status) — **DONE (S36)** | app.py |
+| 4 | Tests: lanes/shift/pins, fill-from-neighbor, edge no-op, empty-clears, one-batch/one-undo-step, cut-disarm, editor isolation, selection survives (12) — **DONE (S36)** | tests/test_fill.py |
+| 5 | Docs: TUI README (features + 2 key rows + the formula-is-the-series note), root README terminal-taste line, design rows closed, worklog — **DONE (S36); field check pending** | docs |
+
+## References
+
+- Part 6 — `shift_formula` + `$` pins (6.B), `_paste_cell`'s transfer semantics, the request-message pattern, `REBUILD_THRESHOLD` repaint authority.
+- Part 7 — one-batch-one-step undo; fill inherits it untouched.
+- Excel parity notes: Ctrl+D/R fill from the selection's first row/column; single-cell Ctrl+D copies the cell above; Ctrl+D never does series.
