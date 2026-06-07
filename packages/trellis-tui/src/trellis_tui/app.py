@@ -229,6 +229,44 @@ class SaveAsScreen(ModalScreen):
         self.dismiss(None)
 
 
+class RenameScreen(ModalScreen):
+    """Modal sheet-rename prompt (Part 9 #4), prefilled with the current
+    name. Dismisses with the new name, or ``None`` on Esc/empty."""
+
+    DEFAULT_CSS = """
+    RenameScreen {
+        align: center middle;
+    }
+    RenameScreen > Vertical {
+        width: 48;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    """
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, current: str) -> None:
+        super().__init__()
+        self._current = current
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Rename sheet (Enter renames · Esc cancels)")
+            yield Input(value=self._current, id="rename-sheet")
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip() or None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TrellisApp(App):
     """The Trellis terminal spreadsheet.
 
@@ -256,6 +294,7 @@ class TrellisApp(App):
         Binding("ctrl+pageup", "prev_sheet", "Prev sheet", priority=True),
         ("ctrl+t", "new_sheet", "New sheet"),
         ("ctrl+w", "close_sheet", "Close sheet"),
+        ("alt+r", "rename_sheet", "Rename sheet"),
     ]
 
     def __init__(
@@ -399,10 +438,29 @@ class TrellisApp(App):
         if bars:
             bars.first().show(self.path, self.dirty, message)
 
+    def _tab_for(self, view: SheetView) -> Tab | None:
+        tabs = self.query(Tabs)
+        if not tabs:
+            return None
+        try:
+            return tabs.first().query_one(f"#tab-{view.uid}", Tab)
+        except Exception:
+            return None
+
+    def _refresh_tab_label(self, view: SheetView) -> None:
+        """Tab label = sheet name, with a ● while unsaved (the open
+        question resolved: ``Tab.label`` is a plain settable property)."""
+        tab = self._tab_for(view)
+        if tab is not None:
+            tab.label = (
+                f"{view.sheet.name} ●" if view.dirty else view.sheet.name
+            )
+
     def _mark_dirty(self, **ev: object) -> None:
         view = self._view_for(ev.get("sheet"))
-        if view is not None:
+        if view is not None and not view.dirty:
             view.dirty = True  # the changed sheet's view, not necessarily active
+            self._refresh_tab_label(view)  # only on the flip — no churn
         self._quit_armed = False  # new changes re-arm the quit warning
         self._close_armed = False  # and the close warning
         clip = self.sheet_clipboard
@@ -451,6 +509,7 @@ class TrellisApp(App):
             return
         self.dirty = False
         self._quit_armed = False
+        self._refresh_tab_label(self.active_view)
         self._refresh_status(f"saved {path}")
 
     # ------------------------------------------------------------- quit
@@ -593,6 +652,44 @@ class TrellisApp(App):
         await tabs.remove_tab(f"tab-{view.uid}")
         self.workbook.remove_sheet(view.sheet.name)
         self._refresh_status(f"closed {view.sheet.name}")
+
+    def action_rename_sheet(self) -> None:
+        """Alt+R (or double-click the tab): rename the active sheet.
+        Renames the *sheet* — the file path is untouched."""
+        if self._editing():
+            self._refresh_status("finish the edit first")
+            return
+        self.push_screen(
+            RenameScreen(self.sheet.name), callback=self._rename_done
+        )
+
+    def on_click(self, event: events.Click) -> None:
+        """Double-click on a tab = rename (Excel's gesture). The first
+        click of the pair already activated the tab, so the rename
+        always targets the active sheet."""
+        if event.chain != 2:
+            return
+        widget = getattr(event, "widget", None)
+        on_tab = isinstance(widget, Tab) or any(
+            isinstance(a, Tab) for a in getattr(widget, "ancestors", [])
+        )
+        if on_tab:
+            self.action_rename_sheet()
+
+    def _rename_done(self, name: str | None) -> None:
+        if not name:
+            return  # cancelled
+        view = self.active_view
+        old = view.sheet.name
+        if name == old:
+            return
+        if name in self.workbook:
+            self._refresh_status(f"name taken: {name}")
+            return
+        self.workbook.rename_sheet(old, name)
+        self._refresh_tab_label(view)
+        self._sync_chrome()
+        self._refresh_status(f"renamed {old} → {name}")
 
     # ------------------------------------------------------ cursor mirror
 
@@ -960,20 +1057,43 @@ class TrellisApp(App):
 # ----------------------------------------------------------------- entry
 
 
+def _unique_sheet_name(taken, stem: str) -> str:
+    """First free name for a CLI-opened file: the stem, then stem-2…"""
+    name = stem or "Sheet"
+    n = 2
+    while name in taken:
+        name = f"{stem or 'Sheet'}-{n}"
+        n += 1
+    return name
+
+
 def build_app(args: list[str]) -> TrellisApp | None:
     """Build the app from CLI args; ``None`` means already handled
-    (``--version``). A path that doesn't exist yet opens an empty
-    workbook with the path remembered — ``Ctrl+S`` creates the file."""
+    (``--version``).
+
+    ``trellis a.csv b.csv …`` opens one tab per file (Part 9 #4): each
+    sheet is named for its file's stem (collisions dedupe ``stem-2``),
+    loaded via ``read_csv(…, workbook=…)`` — the multi-file seam the
+    engine grew in Part 3, consumed at last. A path that doesn't exist
+    yet opens an empty tab with the path remembered — ``Ctrl+S``
+    creates the file."""
     if "--version" in args:
         print(f"trellis-tui {__version__}")
         return None
-    path = args[0] if args else None
-    workbook = None
-    if path and Path(path).exists():
-        # formulas=True mirrors save: =-cells load live, so a file the TUI
-        # wrote reopens as the same spreadsheet (Matthew's first-run find).
-        workbook = read_csv(path, formulas=True)
-    return TrellisApp(workbook, path=path)
+    if not args:
+        return TrellisApp(None)
+    workbook = Workbook()
+    paths: dict[str, str] = {}
+    for arg in args:
+        name = _unique_sheet_name(paths, Path(arg).stem)
+        if Path(arg).exists():
+            # formulas=True mirrors save: =-cells load live, so a file
+            # the TUI wrote reopens as the same spreadsheet.
+            read_csv(arg, sheet_name=name, workbook=workbook, formulas=True)
+        else:
+            workbook.add_sheet(name)
+        paths[name] = arg
+    return TrellisApp(workbook, paths=paths)
 
 
 def main(argv: list[str] | None = None) -> int:

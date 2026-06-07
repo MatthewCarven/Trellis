@@ -253,3 +253,117 @@ async def test_background_rebuild_does_not_steal_the_formula_bar():
         app.views[1].sheet[(200, 1)] = 1
         await pilot.pause()
         assert bar.shown[0] == "A2"  # the bar still mirrors the active tab
+
+
+# ------------------------------------------------- #4: rename + CLI files
+
+
+async def test_alt_r_renames_the_active_sheet():
+    from textual.widgets import Tab
+
+    app = _two_sheet_app()
+    async with app.run_test() as pilot:
+        await pilot.press("alt+r")
+        await pilot.pause()
+        # The modal Input arrives prefilled with the current name.
+        await pilot.press("ctrl+u")  # clear it (Input's delete-left-all)
+        await pilot.press("g", "a", "m", "m", "a", "enter")
+        await pilot.pause()
+        assert app.sheet.name == "gamma"
+        assert "gamma" in app.workbook and "alpha" not in app.workbook
+        assert "renamed alpha → gamma" in _status(app)
+        tab = app._tab_for(app.active_view)
+        assert str(tab.label) == "gamma"
+        assert [v.sheet.name for v in app.views] == ["gamma", "beta"]
+
+
+async def test_rename_collision_hints_and_keeps_the_name():
+    app = _two_sheet_app()
+    async with app.run_test() as pilot:
+        await pilot.press("alt+r")
+        await pilot.pause()
+        await pilot.press("ctrl+u")
+        await pilot.press("b", "e", "t", "a", "enter")
+        await pilot.pause()
+        assert app.sheet.name == "alpha"  # unchanged
+        assert "name taken: beta" in _status(app)
+
+
+async def test_rename_esc_cancels():
+    app = _two_sheet_app()
+    async with app.run_test() as pilot:
+        await pilot.press("alt+r")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.sheet.name == "alpha"
+
+
+async def test_double_click_on_tab_opens_rename():
+    from trellis_tui.app import RenameScreen
+
+    app = _two_sheet_app()
+    async with app.run_test() as pilot:
+        tab = app._tab_for(app.views[0])
+        await pilot.click(tab, times=2)
+        await pilot.pause()
+        assert isinstance(app.screen, RenameScreen)
+        await pilot.press("escape")
+
+
+async def test_tab_label_carries_the_dirty_marker(tmp_path):
+    path = tmp_path / "alpha.csv"
+    app = _two_sheet_app(paths={"alpha": str(path)})
+    async with app.run_test() as pilot:
+        assert str(app._tab_for(app.views[0]).label) == "alpha"
+        await pilot.press("7", "enter")  # dirty alpha
+        assert str(app._tab_for(app.views[0]).label) == "alpha ●"
+        assert str(app._tab_for(app.views[1]).label) == "beta"  # untouched
+        await pilot.press("ctrl+s")
+        assert str(app._tab_for(app.views[0]).label) == "alpha"  # saved
+
+
+async def test_rename_keeps_the_save_path(tmp_path):
+    path = tmp_path / "data.csv"
+    app = _two_sheet_app(paths={"alpha": str(path)})
+    async with app.run_test() as pilot:
+        await pilot.press("alt+r")
+        await pilot.pause()
+        await pilot.press("ctrl+u")
+        await pilot.press("x", "enter")
+        await pilot.pause()
+        assert app.sheet.name == "x"
+        assert app.path == str(path)  # the file identity is untouched
+        await pilot.press("4", "enter", "ctrl+s")
+        assert path.exists()
+
+
+def test_build_app_opens_one_tab_per_file(tmp_path):
+    from trellis_tui.app import build_app
+
+    a = tmp_path / "sales.csv"
+    b = tmp_path / "costs.csv"
+    a.write_text("1,=A1*2\n", encoding="utf-8")
+    b.write_text("3\n", encoding="utf-8")
+    app = build_app([str(a), str(b)])
+    assert [v.sheet.name for v in app.views] == ["sales", "costs"]
+    assert app.views[0].path == str(a)
+    assert app.views[1].path == str(b)
+    assert app.views[0].sheet["B1"].value == 2  # formulas load live
+    assert app.views[1].sheet["A1"].value == 3
+
+
+def test_build_app_dedupes_stems_and_remembers_new_paths(tmp_path):
+    from trellis_tui.app import build_app
+
+    d1 = tmp_path / "one"
+    d2 = tmp_path / "two"
+    d1.mkdir()
+    d2.mkdir()
+    p1 = d1 / "data.csv"
+    p1.write_text("1\n", encoding="utf-8")
+    p2 = d2 / "data.csv"  # same stem, different dir; does not exist yet
+    app = build_app([str(p1), str(p2)])
+    assert [v.sheet.name for v in app.views] == ["data", "data-2"]
+    assert app.views[1].path == str(p2)  # new-file flow, path remembered
+    assert app.views[1].sheet.used_range() is None  # empty tab
