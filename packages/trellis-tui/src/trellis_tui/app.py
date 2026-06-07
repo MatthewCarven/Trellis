@@ -78,9 +78,19 @@ from pathlib import Path
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Label, Static
+from textual.widgets import (
+    ContentSwitcher,
+    Footer,
+    Header,
+    Input,
+    Label,
+    Static,
+    Tab,
+    Tabs,
+)
 
 from trellis import Cell, Sheet, Workbook, read_csv, shift_formula, to_a1
 from trellis_undo import attach as attach_undo, detach as detach_undo
@@ -141,9 +151,12 @@ class SheetView:
     engine-event ``subs`` attach on app mount and detach on unmount.
     """
 
-    def __init__(self, sheet: Sheet, path: str | None = None) -> None:
+    def __init__(self, sheet: Sheet, path: str | None = None, uid: int = 0) -> None:
         self.sheet = sheet
         self.path = path
+        #: Stable identity for DOM ids (``grid-{uid}`` / ``tab-{uid}``)
+        #: — list positions shift when tabs close; uids never do.
+        self.uid = uid
         self.dirty = False
         self.grid: SheetGrid | None = None
         self.undo_log = None
@@ -226,11 +239,23 @@ class TrellisApp(App):
 
     TITLE = "Trellis"
     CSS = """
-    SheetGrid { height: 1fr; }
+    ContentSwitcher { height: 1fr; }
+    SheetGrid { height: 100%; }
     """
     BINDINGS = [
         ("ctrl+s", "save", "Save"),
         ("ctrl+q", "quit", "Quit"),
+        # Sheet tabs (Part 9). The switch keys need priority=True:
+        # DataTable is a ScrollView, which binds ctrl+pageup/pagedown
+        # for horizontal paging — the focused grid would eat them first.
+        # Priority also fires while editing, so the actions guard that
+        # case with a status hint. Ctrl+T/Ctrl+W stay non-priority:
+        # nothing shadows them in nav mode, and while editing the
+        # Input's own ctrl+w (delete-word) correctly wins.
+        Binding("ctrl+pagedown", "next_sheet", "Next sheet", priority=True),
+        Binding("ctrl+pageup", "prev_sheet", "Prev sheet", priority=True),
+        ("ctrl+t", "new_sheet", "New sheet"),
+        ("ctrl+w", "close_sheet", "Close sheet"),
     ]
 
     def __init__(
@@ -251,10 +276,13 @@ class TrellisApp(App):
         if path is not None:
             mapping.setdefault(sheets[0].name, path)
         #: One SheetView per sheet, in workbook order. The first is active.
+        self._next_uid = 0
         self.views: list[SheetView] = [
-            SheetView(sh, mapping.get(sh.name)) for sh in sheets
+            SheetView(sh, mapping.get(sh.name), uid=self._take_uid())
+            for sh in sheets
         ]
-        self._active_index = 0
+        self._active_uid = self.views[0].uid
+        self._close_armed = False  # first Ctrl+W on a dirty sheet warns
         self._edit_addr: tuple[int, int] | None = None
         self._edit_prefill: str | None = None  # set only for revise-edits
         self._quit_armed = False  # first dirty Ctrl+Q warns; second quits
@@ -271,9 +299,16 @@ class TrellisApp(App):
     # surface) reading/writing the ACTIVE view — app.sheet is "the sheet"
     # exactly as before, it just follows the active tab now.
 
+    def _take_uid(self) -> int:
+        self._next_uid += 1
+        return self._next_uid
+
     @property
     def active_view(self) -> SheetView:
-        return self.views[self._active_index]
+        for view in self.views:
+            if view.uid == self._active_uid:
+                return view
+        return self.views[0]  # unreachable unless mid-mutation
 
     @property
     def sheet(self) -> Sheet:
@@ -308,11 +343,18 @@ class TrellisApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield FormulaBar()
-        # UI is still single-tab at Part 9 #2: the active view's grid.
-        # #3 swaps this for Tabs + a ContentSwitcher of per-view grids.
-        view = self.active_view
-        view.grid = SheetGrid(view.sheet)
-        yield view.grid
+        # One grid per view inside a ContentSwitcher (Part 9 #3): grid-
+        # per-sheet keeps cursor/selection/window state per tab for free,
+        # and every grid's engine subscriptions stay live so background
+        # render caches keep themselves warm.
+        with ContentSwitcher(initial=f"grid-{self.active_view.uid}"):
+            for view in self.views:
+                view.grid = SheetGrid(view.sheet, id=f"grid-{view.uid}")
+                yield view.grid
+        # The tab strip sits at the bottom, Excel-style.
+        yield Tabs(
+            *(Tab(v.sheet.name, id=f"tab-{v.uid}") for v in self.views)
+        )
         yield StatusBar()
         yield Footer()
 
@@ -326,7 +368,7 @@ class TrellisApp(App):
         # dirties); handlers route by the payload's ``sheet``.
         for view in self.views:
             self._attach_view(view)
-        self.query_one(FormulaBar).show_cell(self.sheet, (0, 0))
+        self._sync_chrome()
         message = None
         if self.path and not Path(self.path).exists():
             message = "new file — Ctrl+S creates it"
@@ -362,6 +404,7 @@ class TrellisApp(App):
         if view is not None:
             view.dirty = True  # the changed sheet's view, not necessarily active
         self._quit_armed = False  # new changes re-arm the quit warning
+        self._close_armed = False  # and the close warning
         clip = self.sheet_clipboard
         if clip is not None and clip.mode == "cut":
             # Any engine change while a cut is pending demotes it to a
@@ -428,6 +471,129 @@ class TrellisApp(App):
             return
         self.exit()
 
+    # ------------------------------------------------------------- tabs
+
+    def _view_by_uid(self, uid: int) -> SheetView | None:
+        for view in self.views:
+            if view.uid == uid:
+                return view
+        return None
+
+    def _editing(self) -> bool:
+        bars = self.query(FormulaBar)
+        return bool(bars) and bars.first().editing
+
+    def _sync_chrome(self) -> None:
+        """Point the chrome at the active view: title, status, and the
+        formula bar (cell mirror, or the range readout if the incoming
+        grid still has a live selection)."""
+        view = self.active_view
+        self.sub_title = view.path or view.sheet.name
+        bars = self.query(FormulaBar)
+        if bars and not bars.first().editing and view.grid is not None:
+            cursor = view.grid.cursor_coordinate
+            rect = view.grid.selection_range
+            if rect is not None and rect[0] != rect[1]:
+                (r0, c0), (r1, c1) = rect
+                bars.first().show_range(
+                    to_a1(cursor.row, cursor.column),
+                    f"{to_a1(r0, c0)}:{to_a1(r1, c1)}"
+                    f" ({r1 - r0 + 1}×{c1 - c0 + 1})",
+                )
+            else:
+                bars.first().show_cell(view.sheet, (cursor.row, cursor.column))
+        self._refresh_status(None)
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        """The single switch path — clicks, Ctrl+PgUp/PgDn, Ctrl+T and
+        Ctrl+W all funnel through Tabs activation."""
+        if event.tab.id is None:
+            return
+        view = self._view_by_uid(int(event.tab.id.removeprefix("tab-")))
+        if view is None or view.grid is None:
+            return
+        self._active_uid = view.uid
+        self._close_armed = False  # switching disarms a pending close
+        switchers = self.query(ContentSwitcher)
+        if switchers:
+            switchers.first().current = f"grid-{view.uid}"
+        self._sync_chrome()
+        view.grid.focus()
+
+    def _cycle_sheet(self, step: int) -> None:
+        if self._editing():
+            self._refresh_status("finish the edit first")
+            return
+        if len(self.views) < 2:
+            return
+        index = next(
+            i for i, v in enumerate(self.views) if v.uid == self._active_uid
+        )
+        target = self.views[(index + step) % len(self.views)]
+        self.query_one(Tabs).active = f"tab-{target.uid}"
+
+    def action_next_sheet(self) -> None:
+        self._cycle_sheet(1)
+
+    def action_prev_sheet(self) -> None:
+        self._cycle_sheet(-1)
+
+    def action_new_sheet(self) -> None:
+        """Ctrl+T: a new pathless sheet, named SheetN (first free N) —
+        name a file at the first Ctrl+S."""
+        if self._editing():
+            self._refresh_status("finish the edit first")
+            return
+        n = 1
+        while f"Sheet{n}" in self.workbook:
+            n += 1
+        sheet = self.workbook.add_sheet(f"Sheet{n}")
+        view = SheetView(sheet, None, uid=self._take_uid())
+        self.views.append(view)
+        self._attach_view(view)
+        view.grid = SheetGrid(sheet, id=f"grid-{view.uid}")
+        self.query_one(ContentSwitcher).mount(view.grid)
+        tabs = self.query_one(Tabs)
+        tabs.add_tab(Tab(sheet.name, id=f"tab-{view.uid}"))
+        tabs.active = f"tab-{view.uid}"
+        self._refresh_status(f"new sheet {sheet.name} — Ctrl+S names its file")
+
+    async def action_close_sheet(self) -> None:
+        """Ctrl+W: close the active tab. Unsaved warns once; the last
+        tab refuses (quit is Ctrl+Q). Closing removes the sheet from
+        the session workbook — sheet = file, buffers-model honest."""
+        if self._editing():
+            self._refresh_status("finish the edit first")
+            return
+        if len(self.views) == 1:
+            self._refresh_status("last sheet — Ctrl+Q quits")
+            return
+        view = self.active_view
+        if view.dirty and not self._close_armed:
+            self._close_armed = True
+            self._refresh_status(
+                f"{view.sheet.name} unsaved — Ctrl+S saves, Ctrl+W again closes"
+            )
+            return
+        self._close_armed = False
+        index = next(
+            i for i, v in enumerate(self.views) if v.uid == view.uid
+        )
+        neighbor = (
+            self.views[index + 1]
+            if index + 1 < len(self.views)
+            else self.views[index - 1]
+        )
+        tabs = self.query_one(Tabs)
+        tabs.active = f"tab-{neighbor.uid}"  # switch away first
+        self.views.remove(view)
+        self._detach_view(view)
+        if view.grid is not None:
+            await view.grid.remove()
+        await tabs.remove_tab(f"tab-{view.uid}")
+        self.workbook.remove_sheet(view.sheet.name)
+        self._refresh_status(f"closed {view.sheet.name}")
+
     # ------------------------------------------------------ cursor mirror
 
     def on_data_table_cell_highlighted(self, event) -> None:
@@ -436,11 +602,13 @@ class TrellisApp(App):
         Messages can outlive widgets (a highlight posted just before
         shutdown arrives after the bar unmounts) — query defensively.
         """
+        grid = self.active_view.grid
+        if getattr(event, "data_table", None) is not grid:
+            return  # a background tab's grid rebuilding, not the user
         bars = self.query(FormulaBar)
         if not bars or bars.first().editing:
             return
-        grids = self.query(SheetGrid)
-        if grids and grids.first().selection_range is not None:
+        if grid is not None and grid.selection_range is not None:
             return  # SelectionChanged drives the bar while a selection is live
         bars.first().show_cell(
             self.sheet, (event.coordinate.row, event.coordinate.column)
@@ -456,7 +624,9 @@ class TrellisApp(App):
         bars = self.query(FormulaBar)
         if not bars or bars.first().editing:
             return
-        grid = self.query_one(SheetGrid)
+        grid = self.active_view.grid
+        if grid is None:
+            return
         cursor = grid.cursor_coordinate
         rect = message.rect
         if rect is None or rect[0] == rect[1]:
@@ -686,11 +856,10 @@ class TrellisApp(App):
         bars = self.query(FormulaBar)
         if bars and bars.first().editing:
             return  # belt-and-suspenders: Input.stop()s its paste anyway
-        grids = self.query(SheetGrid)
-        if not grids:
+        grid = self.active_view.grid
+        if grid is None:
             return
         event.stop()
-        grid = grids.first()
         rect = grid.selection_range or grid.cursor_rect()
         clip = self.sheet_clipboard
         if clip is not None and _normalize_paste(event.text) == clip.tsv:
@@ -742,14 +911,14 @@ class TrellisApp(App):
                     for col in range(c0, c1 + 1):
                         commit_text(self.sheet, (row, col), "")
             return
-        grid = self.query_one(SheetGrid)
+        grid = self.active_view.grid
         cursor = grid.cursor_coordinate
         commit_text(self.sheet, (cursor.row, cursor.column), "")  # delete
 
     def _start_edit(self, mode: str, seed: str = "") -> None:
         if self._edit_addr is not None:
             return
-        grid = self.query_one(SheetGrid)
+        grid = self.active_view.grid
         cursor = grid.cursor_coordinate
         address = (cursor.row, cursor.column)
         if mode == "revise":
@@ -778,7 +947,7 @@ class TrellisApp(App):
             # commits as its error value (formula preserved for F2).
             commit_text(self.sheet, address, message.text)
 
-        grid = self.query_one(SheetGrid)
+        grid = self.active_view.grid
         grid.focus()
         row = max(0, address[0] + message.move[0])
         column = max(0, address[1] + message.move[1])
