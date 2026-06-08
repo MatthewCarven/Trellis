@@ -298,7 +298,11 @@ class TrellisApp(App):
         Binding("ctrl+pageup", "prev_sheet", "Prev sheet", priority=True),
         ("ctrl+t", "new_sheet", "New sheet"),
         ("ctrl+w", "close_sheet", "Close sheet"),
-        ("alt+r", "rename_sheet", "Rename sheet"),
+        # Rename: Ctrl+Shift+R, NOT Alt+R — Alt+R is an AMD/NVIDIA
+        # overlay shortcut (resource usage) that the GPU driver eats
+        # before it reaches the terminal (field-found, S36). Double-
+        # click the tab is the mouse path.
+        ("ctrl+shift+r", "rename_sheet", "Rename sheet"),
     ]
 
     def __init__(
@@ -658,8 +662,8 @@ class TrellisApp(App):
         self._refresh_status(f"closed {view.sheet.name}")
 
     def action_rename_sheet(self) -> None:
-        """Alt+R (or double-click the tab): rename the active sheet.
-        Renames the *sheet* — the file path is untouched."""
+        """Ctrl+Shift+R (or double-click the tab): rename the active
+        sheet. Renames the *sheet* — the file path is untouched."""
         if self._editing():
             self._refresh_status("finish the edit first")
             return

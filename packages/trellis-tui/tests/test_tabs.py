@@ -258,12 +258,12 @@ async def test_background_rebuild_does_not_steal_the_formula_bar():
 # ------------------------------------------------- #4: rename + CLI files
 
 
-async def test_alt_r_renames_the_active_sheet():
+async def test_ctrl_shift_r_renames_the_active_sheet():
     from textual.widgets import Tab
 
     app = _two_sheet_app()
     async with app.run_test() as pilot:
-        await pilot.press("alt+r")
+        await pilot.press("ctrl+shift+r")
         await pilot.pause()
         # The modal Input arrives prefilled with the current name.
         await pilot.press("ctrl+u")  # clear it (Input's delete-left-all)
@@ -280,7 +280,7 @@ async def test_alt_r_renames_the_active_sheet():
 async def test_rename_collision_hints_and_keeps_the_name():
     app = _two_sheet_app()
     async with app.run_test() as pilot:
-        await pilot.press("alt+r")
+        await pilot.press("ctrl+shift+r")
         await pilot.pause()
         await pilot.press("ctrl+u")
         await pilot.press("b", "e", "t", "a", "enter")
@@ -292,7 +292,7 @@ async def test_rename_collision_hints_and_keeps_the_name():
 async def test_rename_esc_cancels():
     app = _two_sheet_app()
     async with app.run_test() as pilot:
-        await pilot.press("alt+r")
+        await pilot.press("ctrl+shift+r")
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
@@ -327,7 +327,7 @@ async def test_rename_keeps_the_save_path(tmp_path):
     path = tmp_path / "data.csv"
     app = _two_sheet_app(paths={"alpha": str(path)})
     async with app.run_test() as pilot:
-        await pilot.press("alt+r")
+        await pilot.press("ctrl+shift+r")
         await pilot.pause()
         await pilot.press("ctrl+u")
         await pilot.press("x", "enter")
