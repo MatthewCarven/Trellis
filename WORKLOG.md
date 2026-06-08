@@ -19,7 +19,7 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 **Suites: core 816 / undo 15 / TUI 175** (was 147), all green. Docs: TUI README (status, buffers-model feature bullet, 5 key rows, deliberately-not additions incl. sheet-local formulas + save-all, 175), root README (Status + taste lines), design.md rows #1–#6 closed + both open questions resolved (labels cheap; the ScrollView key-theft finding noted against the field-check question).
 
-**PART 9 BUILT — field check closes it (the standing rule):** Ctrl+PgUp/PgDn and Alt+R through Windows Terminal are the open question (click-the-tab and double-click are the every-terminal fallbacks). Matthew: pull, `trellis a.csv b.csv`, switch/add/rename/close, cut something across tabs, Ctrl+Z both sides. NEXT per pull list after that: vim keymap / xlsx (deprioritized) — or whatever the field suggests.
+**PART 9 FIELD-VERIFIED (same session, Matthew): "all works well"** — sheet switching, per-sheet undo, close all confirmed on Windows. One casualty: **Alt+R never arrives — the GPU driver (AMD/NVIDIA overlay, resource-usage shortcut) eats it upstream of the terminal.** Rebound rename to **Ctrl+Shift+R** (kept the R mnemonic; double-click the tab was always the mouse path and is unaffected). The mirror-image of the #3 ScrollView lesson: #3 was the app's own widget stealing a key (Pilot caught it); Alt+R is the OS/driver swallowing a key before any app sees it (only a field check catches it). PART 9 COMPLETE. NEXT per pull: vim keymap / xlsx (deprioritized) — or whatever the field suggests.
 
 ---
 ## 2026-06-08 — Session 36: Part 8 — keyboard fill (Ctrl+D / Ctrl+R)
