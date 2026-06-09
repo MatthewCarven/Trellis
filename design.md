@@ -1080,3 +1080,170 @@ Rows #2–#5 each land green before the next starts — same rhythm as Part 6.
 - Part 7 — per-sheet `UndoLog` attachment (`attach(sheet)` per view; `attach_workbook` is the REPL's spelling of the same).
 - Part 6 — `Clipboard` snapshot model (why cross-tab paste is safe), `_mark_dirty` disarm.
 - Textual: `Tabs`, `ContentSwitcher`, `Tab.label`.
+
+---
+
+# Part 10: Vim keymap — the TUI's first extension point (keymap plugins)
+
+## Purpose
+
+A vim keymap for the TUI — and, because of decision 3, the seam that makes it possible: **the
+TUI's first extension point.** Until now the TUI hardcodes its keys (Part 5, deliberately). This
+part introduces a *keymap* abstraction so a plugin can supply a whole alternative key language.
+
+The shape is set by decision 6: **there is one key path, and every keymap goes through it —
+including the default.** The current Excel bindings are ported to a built-in `ExcelKeymap`; vim
+ships as the external `trellis-tui-vim` package. So the contract is validated by **two consumers
+from day one** — an extension point with a single consumer is just that consumer's internals
+wearing a coat. Three reference plugins now bracket three extension styles: mathpack (entry-point
+globals), trellis-undo (events + meta), and the keymaps (a frontend strategy hook).
+
+Engine additions: **none** — all in the TUI layer. The core design test doesn't apply to a frontend.
+
+## Decisions confirmed up front (Matthew, 2026-06-09/10)
+
+1. **Opt-in via `--vim`.** Excel keys stay the boot default; `--vim` swaps the *active keymap* from
+   `excel` to `vim` (see decision 6). A config knob can follow.
+2. **Core subset for v1.** Modes (Normal/Insert/Visual/Command), `hjkl` + counts, `gg`/`G`, `w`/`b`
+   as data-block jumps, `0`/`$`/`^`, operators `d`/`y`/`c`/`x`/`p`/`P` with `dd`/`yy`, insert-entry
+   `i`/`a`/`I`/`A`, `u`/`Ctrl+r`, `:w`/`:q`/`:wq`/`:x`/`:q!`/`:{n}`.
+3. **Keymap-plugin API now.** Vim is a keymap object behind a real extension point, not a hardcoded mode.
+4. **In vim, `Ctrl+D` = half-page-down, `Ctrl+R` = redo.** The Part 8 fill keys are the *Excel
+   keymap's* binding; the vim keymap rebinds them. Fill stays reachable in vim via Visual + `p`.
+5. **Vim ships as a separate `packages/trellis-tui-vim/` package**, registered via an entry point —
+   proving the hook from *outside*, like mathpack.
+6. **One path — Excel is a keymap too.** The default bindings port to a built-in `ExcelKeymap` (the
+   default active keymap); every key in every config flows through the one `handle() → Action`
+   delegate. **No hardcoded fall-through path.** This reverses an earlier additive-hook lean: a
+   single consumer wouldn't prove the contract general, and the additive design's fall-through
+   (vim's unhandled keys dropping into Excel bindings) was a precedence-bug waiting to happen. One
+   path = the active keymap is the *sole* authority; switching fully commits. **`ExcelKeymap`
+   *should* reproduce today's behavior** — deviation is allowed only where textual's own global key
+   handling intercepts or blocks a key (accommodate the framework, don't fight it). The 175 tests
+   are the regression net for the port.
+7. **Chrome boundary: sheet/tab/quit stay app-keys.** Window-level keys — `Ctrl+PgUp/PgDn`,
+   `Ctrl+T`/`Ctrl+W`, `Ctrl+Q` — remain app-level bindings, but emit the same `Sheet`/`Quit`
+   Actions through the shared executor, so a keymap can also trigger them (vim `:w`/`:q`, a future
+   `gt`). Keymaps own grid/cell/mode keys + the command-line verbs; the app owns the window chrome.
+8. **Keymaps see our own textual-free `KeyPress`, not textual's `Key`.** A ~20-line adapter wraps
+   textual's already-parsed `Key` at the boundary into `KeyPress(.key, .char, .ctrl/.alt/.shift)`;
+   keymap packages import only our contract (the `render.py`/core decoupling, one layer out — the
+   keymap drives the TUI from outside the way the TUI drives the engine from outside). Key-name
+   strings mirror textual's for now; an own key-name vocabulary + translation table is deferred
+   until a non-textual frontend ever exists (it may never — simplicity over clever solvers). textual
+   does the OS/terminal parsing under the adapter either way, so this is decoupling at ~20 lines,
+   not OS-key work.
+
+## The insight that makes this cheap: the TUI is already half-modal
+
+Vim's bargain is modes — commands in Normal, text in Insert. The TUI already runs this split,
+unlabeled, so the work is mostly *naming and redirecting* existing machinery:
+
+| Vim mode | Already is… | Reused as-is |
+|----------|-------------|--------------|
+| **Insert** | the `FormulaBar` `CellEditor`; `commit_text` is the one write path | editor entry (`EditRequest`), `Esc` cancel |
+| **Visual** | the selection model — `(anchor, cursor)`, `selection_range`, `SelectionChanged` | extend/collapse, the one-batch `ClearRequest` |
+| **Normal** | "grid focused, not editing" — `app._editing()` is the seam | the keymap delegate plugs in here |
+
+Operators land on existing intents: `y`→`CopyRequest`, `d`/`x`→`Cut`/`ClearRequest`,
+`p`→`PasteRequest`, `u`/`Ctrl+r`→the undo requests. The grid already posts every one.
+
+## The extension contract (the load-bearing new public surface — treat like Part 3)
+
+Three pieces. The discipline mirrors the engine's: **the keymap never writes** — it reads context
+and returns an Action; the TUI executes it (the frontend echo of "the grid never writes the
+engine"). The contract is **textual-free** (decision 8) — keymap packages don't import textual.
+
+### 1. `Action` — the closed vocabulary the TUI executes
+- `Move(dr, dc, extend=False)` / `MoveTo(row, col, extend=False)` — cursor moves + selection growth
+  (`hjkl`, `gg`/`G`, `0`/`$`, data-block `w`/`b`, page motions; the keymap computes the target).
+- `BeginEdit(caret="start"|"end", seed=None)` — enter Insert; maps to `EditRequest`("revise") + a
+  caret-placement addition. `seed` carries Excel's type-to-edit (printable → replace).
+- `EnterMode(name)` — Normal/Visual/Command (drives the mode indicator).
+- `Operate(op, rect=None)`, `op ∈ {copy, cut, clear, paste, change}` — `rect` defaults to the
+  selection; `change` = clear then `BeginEdit`. Maps to the Copy/Cut/Clear/Paste requests.
+- **`Fill(axis, rect=None)`** — *added by modeling Excel* (Ctrl+D/R; vim doesn't need it, so a
+  vim-only contract would have shipped this gap). The two-consumer payoff, concretely.
+- `Undo()` / `Redo()`, `Save(prompt=False)` / `Quit(force=False)`, `Sheet("next"|"prev")` — map to
+  the existing actions. `Hint(msg)` — a status note; returning `None` = consumed-pending or ignored.
+
+### 2. `KeyContext` — the read-only state a keymap sees
+`mode`, `cursor=(row,col)`, `selection: Rect|None`, `used_range: Rect|None`, `cell(row,col)->Cell`
+(read-only, for data-block motions), `viewport_rows`/`viewport_cols` (paging), `editing: bool`.
+Enough to resolve every core-subset motion and operator; **nothing writable.**
+
+### 3. `Keymap` — what a plugin implements
+```
+class Keymap(Protocol):
+    name: str
+    def initial_mode(self) -> str: ...                       # "normal" for vim, "default" for excel
+    def handle(self, key: KeyPress, ctx: KeyContext) -> Action | None: ...
+    def key_table(self) -> list[KeyRow]: ...                 # optional, for help
+```
+One **stateful** instance per session (it holds the pending count/operator — vim parsing is more
+than a static table, which is why it's `handle(...)`, not a dict). `KeyPress` is our thin
+textual-free wrapper (decision 8): `.key` (str), `.char` (str|None), `.ctrl`/`.alt`/`.shift`.
+
+### Discovery + selection
+trellis-tui ships the built-in **`ExcelKeymap`** as the default active keymap. Entry-point group
+**`trellis_tui.keymaps`** registers *additional* keymaps (`name = "module:factory"`,
+`factory() -> Keymap`; mathpack's pattern). `--keymap NAME` selects among the built-in + registered;
+default = `excel`; `--vim` = sugar for `--keymap vim`; unknown name errors with the list.
+
+### The one path + the chrome boundary
+Every key the grid sees goes to `active_keymap.handle(key, ctx)`; the returned Action runs through a
+shared app-side **executor**. There is no second, non-delegate path. Two scopes share that executor:
+the **keymap** owns grid/cell/mode keys + the command-line verbs (sole authority), and **app-chrome**
+owns the window keys (decision 7) — both emit the same Actions. **Insert mode bypasses the keymap** —
+the editor owns its keys as today; only `Esc` routes back to leave Insert. The textual key-routing
+integration (priority vs `on_key`, the Part 9 ScrollView key-theft lesson) is the build-phase sharp edge.
+
+## Why this is house-consistent
+Two consumers validate the contract from day one (the default dogfoods the hook — "library first");
+entry-point discovery of a named registerable (mathpack); read-only context + return-don't-write
+(the grid-never-writes-engine discipline); textual-free contract (render.py); a locked public
+vocabulary with contract tests (Part 3's payload lock); and the default ported behind a facade with
+the suite green (Part 9's active-view move).
+
+## Rejected / deferred
+- **Additive hook (default stays hardcoded, vim the only keymap)** — rejected at decision 6: one
+  consumer doesn't prove the contract, and the fall-through is a precedence-bug surface.
+- **Default-on vim / hardcoded vim mode** — per decisions 1, 3.
+- **`o`/`O`** — need `Sheet.insert_row`, which doesn't exist and would be a *core* part by the design
+  test; deferred (ship `i`/`a`/`I`/`A`).
+- **Search, `f`/`t`, marks, registers, macros, `.`-repeat** — per decision 2; later follow-ups.
+- **Own key-name vocabulary + translation table** — per decision 8; pragmatic textual-name mirroring
+  now, harden only if a non-textual frontend appears.
+
+## Open questions (settled at build / field, not contract surface)
+- **`change`/`c` over multi-cell**, and **counts × motions/operators** (`3dd`, `d3j`) —
+  vim-keymap-internal parser rules; decided when we build the vim package (row 3), not contract-level.
+- **Field check (S35 rule):** `Esc` timing, the `:` modal, printable-swallowing vs bracketed-paste —
+  through Windows Terminal, at row 4.
+
+## What the vim keymap maps (the reference plugin's key table)
+- **Motions:** `h`/`j`/`k`/`l`; `w`/`b` = next/prev contiguous-data block (Excel `Ctrl+→`/`←`);
+  `0`/`$` = first/last non-empty in the row, `^`=`0`; `gg`/`G` = top/bottom of the column's data;
+  `Ctrl+D`/`Ctrl+U` = half-page; counts prefix any (`3j`).
+- **Operators:** `d`/`x` clear, `y` copy, `p`/`P` paste, `c` change; doubled = row-wise (`dd`, `yy`).
+- **Insert:** `i`/`I` (caret start), `a`/`A` (caret end). **Visual:** `v`/`V`/`Ctrl+v` + motion +
+  operator. **Command:** `:w`/`:q`/`:wq`/`:x`/`:q!`/`:{n}`. **Undo:** `u`/`Ctrl+r`.
+
+## Implementation breakdown (staged across sessions)
+| # | What lands | Where |
+|---|------------|-------|
+| 1 | This design pass + the contract — **DONE (S37)** | design.md Part 10 (+ docs/keymap-plugin.md at row 4) |
+| 2 | Keymap layer in trellis-tui: the delegate + Action executor (incl. `Fill`) + `KeyContext` + mode state/`-- MODE --` indicator + entry-point discovery + `--keymap`/`--vim`. **Port the current bindings into the built-in `ExcelKeymap` (default active); 175 tests are the net.** Possibly two sessions if the port is gnarly. | trellis-tui |
+| 3 | `packages/trellis-tui-vim/`: the vim `Keymap` — modes, motions, operators, command-line — via the entry point. + hermetic tests | new package |
+| 4 | Docs (both READMEs, the contract doc, design rows) + worklog; then **field-verify** (Windows Terminal) | docs + Matthew |
+
+Rows land green before the next starts — the Part 6/9 rhythm.
+
+## References
+- The "two consumers before you trust an abstraction" rule — why Excel-as-a-keymap, not additive.
+- Part 3 — lock-the-contract + contract tests (the model for the Action/KeyContext/Keymap surface).
+- Part 5 — hardcode-first; the formula-bar editing model (= Insert). Part 6 — the selection model
+  (= Visual) and the request-message pattern (= the Action targets).
+- Part 7 — one-batch-one-step undo (`u`/`Ctrl+r`). Part 8 — the `Ctrl+D`/`Ctrl+R` fill keys.
+- mathpack — entry-point discovery; `render.py` — the textual-free precedent; Part 9 — facade-keeps-suite-green.
+- `app._editing()`, `grid.py` BINDINGS — the Normal/Insert seam and the keys being ported.
