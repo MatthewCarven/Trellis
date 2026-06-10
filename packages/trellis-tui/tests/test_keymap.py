@@ -254,6 +254,23 @@ async def test_executor_is_shared_with_chrome():
         app.query_one(Tabs)  # the switch went through the single path
 
 
+async def test_chain_executes_in_order():
+    # Chain = one gesture, several verbs (vim :wq / delete-is-yank).
+    # Hint then Sheet: both run, in order — the status shows the hint,
+    # the active sheet has flipped.
+    wb = Workbook()
+    wb.add_sheet("alpha")
+    wb.add_sheet("beta")
+    app = TrellisApp(wb)
+    async with app.run_test() as pilot:
+        await app._execute(
+            km.Chain((km.Hint("chained"), km.Sheet("next")))
+        )
+        await pilot.pause()
+        assert app.query_one(StatusBar).state[2] == "chained"
+        assert app.sheet.name == "beta"
+
+
 # ----------------------------------------------------- the mode indicator
 
 

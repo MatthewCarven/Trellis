@@ -767,6 +767,13 @@ class TrellisApp(App):
         at execution time: queued actions run in order, so the selection
         a prior ``Move(extend=True)`` grew is the one an ``Operate``
         sees, however fast the keys came in."""
+        if isinstance(action, km.Chain):
+            # One gesture, several verbs (vim :wq, delete-is-yank).
+            # Recursion re-resolves grid/selection per member, so the
+            # execution-time-rect rule holds inside a chain too.
+            for sub in action.actions:
+                await self._execute(sub)
+            return
         grid = self.active_view.grid
         if isinstance(action, (km.Move, km.MoveTo)):
             if grid is None:

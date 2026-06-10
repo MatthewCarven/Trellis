@@ -1234,7 +1234,7 @@ the suite green (Part 9's active-view move).
 |---|------------|-------|
 | 1 | This design pass + the contract — **DONE (S37)** | design.md Part 10 (+ docs/keymap-plugin.md at row 4) |
 | 2 | Keymap layer in trellis-tui: the delegate + Action executor (incl. `Fill`) + `KeyContext` + mode state/`-- MODE --` indicator + entry-point discovery + `--keymap`/`--vim`. **Port the current bindings into the built-in `ExcelKeymap` (default active); 175 tests are the net.** Possibly two sessions if the port is gnarly. — **DONE (S38**, one session: the port came in clean, 175 untouched + 20 contract tests**)** | trellis-tui |
-| 3 | `packages/trellis-tui-vim/`: the vim `Keymap` — modes, motions, operators, command-line — via the entry point. + hermetic tests | new package |
+| 3 | `packages/trellis-tui-vim/`: the vim `Keymap` — modes, motions, operators, command-line — via the entry point. + hermetic tests — **DONE (S38**, same session as row 2: 26 hermetic + 9 Pilot tests; install-level discovery proved in an off-mount venv**)** | new package |
 | 4 | Docs (both READMEs, the contract doc, design rows) + worklog; then **field-verify** (Windows Terminal) | docs + Matthew |
 
 Rows land green before the next starts — the Part 6/9 rhythm.
@@ -1267,6 +1267,32 @@ Rows land green before the next starts — the Part 6/9 rhythm.
   processing, so an Action's `stop()`+`prevent_default()` suppresses DataTable's own cursor
   bindings — arrows route through `Move` like everything else. Pilot's per-key idle wait
   (verified in `_press_keys`) keeps the request-message hop invisible to tests.
+
+## Build addendum (S38, row 3) — what the vim package decided and discovered
+- **`Chain(actions)` joined the vocabulary** (the third build-found verb, after `Fill` and
+  `Select`): vim's `:wq` is save-then-quit and vim's delete is yank-then-clear, and `handle()`
+  returns ONE action. The executor recurses member-by-member, so execution-time rect
+  resolution holds inside a chain.
+- **The vim-internal decisions** (design said "settled at build"): delete IS yank (`x`/`dd`/
+  visual `d` = `Chain((copy, clear))` — `dd` `p` moves a row; the design sketch's "d/x clear"
+  lost to vim fingers); `c` doesn't yank; `p`=`P` (the grid pastes AT the cursor); operators
+  take doubles or the Visual selection — `dw`/`d3j` composition stays out of v1; counts ×
+  motions work everywhere (`3j`, `5G`, `2w`, `3x`, `3dd`); `Ctrl+C` ≈ Esc (it must never fall
+  through to the app's quit binding mid-thought); Enter=down, Backspace=left (vim), the
+  revise-edit lives on `i`/`a`.
+- **Visual operators park the cursor at the region's start** (vim's post-yank/delete cursor)
+  — a trailing `MoveTo` baked from the handle-time selection. Found by the integration suite:
+  `vly` then `p` pasted at the selection's END cell offset; vim fingers expect anchor-relative.
+- **Visual-line tracks its own moving end** (`_vline`/`_vcur`): the grid's `Select` always
+  parks the real cursor at the rect's bottom-right, so extending UPWARD recomputed from the
+  cursor would stall against the anchor row. The keymap is stateful for exactly this class of
+  reason — the contract's `handle()`-not-a-dict call, vindicated.
+- **The `:` command line lives entirely inside the contract**: `EnterMode("command")` + the
+  buffer echoed as `Hint(":w…")` in the status bar; Enter parses to `Chain((EnterMode
+  ("normal"), <verbs>))`; unsupported keys echo back (modal honesty — arrows don't move the
+  grid mid-command). No new widget, no app changes — the v1 `:` modal costs zero chrome.
+- The command-line UX (echo-in-status vs a real `:` input line) is a candidate refinement for
+  the row-4 field check; the contract supports either without changing keymap code.
 
 ## References
 - The "two consumers before you trust an abstraction" rule — why Excel-as-a-keymap, not additive.

@@ -3,6 +3,25 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-11 — Session 38 (later): PART 10 ROW 3 — trellis-tui-vim, the reference keymap plugin
+
+**Context:** row 2 pushed (origin = 1b49f9f) and Matthew said continue — row 3 in the same session, the Part 6/9 same-day rhythm. The third reference package ships: the monorepo now brackets all three extension styles (mathpack = entry-point globals, trellis-undo = events+meta, trellis-tui-vim = a frontend strategy hook).
+
+**Contract prep — `Chain(actions)` joined the vocabulary** (the third build-found verb, after Fill and Select, same discovery class): vim's `:wq` is save-then-quit and vim's delete is yank-then-clear, and `handle()` returns ONE action. Executor recurses member-by-member — execution-time rect resolution holds inside a chain. +1 TUI test (Hint then Sheet, order proved): **TUI 196**.
+
+**The package** (`packages/trellis-tui-vim/`, ~470-line `__init__.py`, imports ONLY `trellis_tui.keymap` — never textual, never the app): `VimKeymap` registered as `vim = "trellis_tui_vim:VimKeymap"` under `trellis_tui.keymaps`; `trellis --vim` selects it. The app's mode is the mode authority (EnterMode out, ctx.mode back); the instance holds only what nobody else can — pending count, pending double (d/y/c/g), the `:` buffer, visual-line's moving end. Core subset all in: hjkl/arrows + counts, w/b Excel data-jumps, 0/^/$ row ends, gg/G column-data (+{n}G/{n}gg/:{n}), Ctrl+D/U half-page, i/I/a/A (caret start/end — the row-2 `caret=` lands its consumer), x/dd/yy/cc, p/P, v/V/Ctrl+v, visual operators, u/Ctrl+r, `:w :q :wq :x :q! :{n}`.
+
+**Vim-internal decisions (design deferred them to build; recorded in design.md S38 row-3 addendum):** delete IS yank (`dd` `p` moves a row — the design sketch's "d/x clear" lost to vim fingers); `c` doesn't yank; `p`=`P` (grid pastes AT the cursor); operators take doubles or Visual — no `dw`/`d3j` composition in v1; counts × motions everywhere; **Ctrl+C ≈ Esc** (it must never fall through to the app's quit mid-thought); Enter=down, Backspace=left. The `:` line lives entirely inside the contract: EnterMode("command") + the buffer echoed as `Hint(":w…")`, Enter parses to a Chain ending back in normal, unsupported keys echo (modal honesty). Zero app changes, zero new widgets.
+
+**Two findings the tests forced:** (1) **visual operators park the cursor at the region's start** (trailing baked MoveTo) — the integration suite caught `vly`+`p` pasting at the selection's END offset; vim fingers expect anchor-relative. (2) **visual-line tracks its own moving end** (`_vline`/`_vcur`) — the grid parks the real cursor at the rect's bottom-right, so upward extension recomputed from the cursor stalls against the anchor. The stateful-`handle()` contract call, vindicated twice in one file.
+
+**Tests: 26 hermetic + 9 Pilot = 35** (hermetic suite runs in 0.2s with a fake KeyContext — the contract's testability promise, kept). Integration proves composition end-to-end: dd+p moves a row with its formula shifting, u un-pastes; `:q` warns dirty / `:q!` exits; `:w` pathless opens the same SaveAs modal as Ctrl+S; Ctrl+T/PgDn chrome alive under vim. **Install-level discovery proved in an off-mount venv** (mathpack's Tier-2 pattern, inline): `available_keymaps()` = excel+vim, `build_app(["--vim"])` boots with it. setup-venv.{ps1,sh} install the new package.
+
+**Suites: core 816 / undo 15 / TUI 196 / vim 35 — all green.** Docs: vim README (key table + the vim-decisions list), root README (three reference extensions; Extending §5 names the reference), TUI README (status/usage/196+35), design.md row 3 closed + S38 row-3 addendum.
+
+**NEXT: row 4 — docs polish (docs/keymap-plugin.md contract doc) + the field check** (Windows Terminal: Esc timing, the `:`-echo UX, printable-swallowing vs bracketed paste — the S35 rule; Part 10 closes field-verified or not at all). Matthew: `scripts\setup-venv.ps1` (installs the new package) then `trellis --vim demo.csv` and live a little.
+
+---
 ## 2026-06-11 — Session 38: Part 10 row 2 — the keymap layer lands, Excel becomes a keymap
 
 **Context:** row 2 of the Part 10 rollout, fresh session off the S37 design. Tree clean at 3ff8450 (one design commit ahead of origin — Matthew's push pending). Predicted "possibly two sessions if the port is gnarly" — it wasn't: **one session, 175 untouched-green on the first full run after the port**, the Part 9 facade rhythm again.

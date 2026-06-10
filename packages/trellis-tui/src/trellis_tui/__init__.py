@@ -33,6 +33,7 @@ from .grid import SheetGrid  # noqa: E402
 from .keymap import (  # noqa: E402
     Action,
     BeginEdit,
+    Chain,
     EnterMode,
     ExcelKeymap,
     Fill,
@@ -57,6 +58,7 @@ from .render import DisplayText, display  # noqa: E402
 __all__ = [
     "Action",
     "BeginEdit",
+    "Chain",
     "DisplayText",
     "EnterMode",
     "ExcelKeymap",

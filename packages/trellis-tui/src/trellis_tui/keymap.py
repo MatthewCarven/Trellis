@@ -49,6 +49,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 __all__ = [
     "Action",
     "BeginEdit",
+    "Chain",
     "ENTRY_POINT_GROUP",
     "EnterMode",
     "ExcelKeymap",
@@ -259,6 +260,18 @@ class Sheet(Action):
     """Cycle the active sheet tab: ``direction`` ``"next"`` | ``"prev"``."""
 
     direction: str
+
+
+@dataclass(frozen=True)
+class Chain(Action):
+    """Several Actions executed in order — one gesture, several verbs.
+    Joined the vocabulary at row 3 (the same discovery class as `Fill`
+    and `Select`): vim's ``:wq`` is save-then-quit and vim's delete is
+    yank-then-clear, and ``handle()`` returns ONE action. The executor
+    runs the members through itself in order, so execution-time rect
+    resolution still holds member by member."""
+
+    actions: tuple  # tuple[Action, ...]
 
 
 @dataclass(frozen=True)
