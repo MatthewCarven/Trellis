@@ -1233,11 +1233,40 @@ the suite green (Part 9's active-view move).
 | # | What lands | Where |
 |---|------------|-------|
 | 1 | This design pass + the contract — **DONE (S37)** | design.md Part 10 (+ docs/keymap-plugin.md at row 4) |
-| 2 | Keymap layer in trellis-tui: the delegate + Action executor (incl. `Fill`) + `KeyContext` + mode state/`-- MODE --` indicator + entry-point discovery + `--keymap`/`--vim`. **Port the current bindings into the built-in `ExcelKeymap` (default active); 175 tests are the net.** Possibly two sessions if the port is gnarly. | trellis-tui |
+| 2 | Keymap layer in trellis-tui: the delegate + Action executor (incl. `Fill`) + `KeyContext` + mode state/`-- MODE --` indicator + entry-point discovery + `--keymap`/`--vim`. **Port the current bindings into the built-in `ExcelKeymap` (default active); 175 tests are the net.** Possibly two sessions if the port is gnarly. — **DONE (S38**, one session: the port came in clean, 175 untouched + 20 contract tests**)** | trellis-tui |
 | 3 | `packages/trellis-tui-vim/`: the vim `Keymap` — modes, motions, operators, command-line — via the entry point. + hermetic tests | new package |
 | 4 | Docs (both READMEs, the contract doc, design rows) + worklog; then **field-verify** (Windows Terminal) | docs + Matthew |
 
 Rows land green before the next starts — the Part 6/9 rhythm.
+
+## Build addendum (S38, row 2) — contract refinements found by building
+- **`Select(rect)` joined the Action vocabulary.** Select-all is not expressible as a single
+  anchored `Move`/`MoveTo` (the anchor must land on the rect's top-left regardless of the
+  cursor), and vim's `V`/`Ctrl+v` Visual entries will want exactly this. Same discovery class
+  as `Fill`: the vocabulary gap shows up only when a real consumer needs the verb.
+- **`None` from `handle()` sharpened to "no action here — the key runs on"** (framework paging,
+  focus, and the app's chrome bindings; DECIDED #7's boundary in practice). The design's
+  "consumed-pending or ignored" reading survives unchanged for the keys a keymap actually
+  parses (vim's pending counts are printables nothing else binds); a keymap that must *deaden*
+  a framework-bound key returns `Hint("")` — the explicit consume. This is what makes chrome
+  keys work under ANY keymap without a chrome-keys list leaking into the grid.
+- **Rects resolve at execution time.** `Operate`/`Fill` default `rect=None` = "the live
+  selection, else the cursor", resolved in the executor — queued Actions execute in order, so
+  a burst of `Move(extend=True)` + `Operate("copy")` can never copy a stale rectangle. The
+  handle-time `KeyContext` is for computing motions, not pre-resolving targets.
+- **Mode indicator semantics:** the status bar renders `-- MODE --` for any mode except the
+  keymap's `initial_mode()` (resting renders nothing). `BeginEdit` execution sets `insert`,
+  editor close restores the resting mode — under Excel you now get an honest `-- INSERT --`
+  while editing (Excel itself flags edit mode in its status bar; deviation embraced).
+  `StatusBar.state` stays a 3-tuple (load-bearing for tests); the mode mirrors at
+  `StatusBar.mode_shown`.
+- **One casualty:** the Footer's `F2 Edit` / `Delete Clear` hints — they were Binding
+  metadata, and the grid no longer has key Bindings. `Keymap.key_table()` is the help surface
+  now (a help screen is a natural row-4+ follow-up).
+- The textual integration came in at the predicted seam: `on_key` runs before binding
+  processing, so an Action's `stop()`+`prevent_default()` suppresses DataTable's own cursor
+  bindings — arrows route through `Move` like everything else. Pilot's per-key idle wait
+  (verified in `_press_keys`) keeps the request-message hop invisible to tests.
 
 ## References
 - The "two consumers before you trust an abstraction" rule — why Excel-as-a-keymap, not additive.

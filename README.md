@@ -11,7 +11,7 @@ The project's design philosophy is *open extensibility*. The core is small. Almo
 
 ## Status
 
-Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, two reference plugins — [trellis-mathpack](packages/trellis-mathpack) (global registration via entry point) and [trellis-undo](packages/trellis-undo) (stateful attachment via events + meta) — and the terminal app ([trellis-tui](packages/trellis-tui), v1 + selection/clipboard/undo/fill/tabs).
+Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, two reference plugins — [trellis-mathpack](packages/trellis-mathpack) (global registration via entry point) and [trellis-undo](packages/trellis-undo) (stateful attachment via events + meta) — and the terminal app ([trellis-tui](packages/trellis-tui), v1 + selection/clipboard/undo/fill/tabs/keymaps).
 
 ## Quick taste (library)
 
@@ -134,6 +134,10 @@ mathpack = "trellis_mathpack:setup"
 ```
 
 `trellis_mathpack.setup` is a no-argument callable that does the `@register_function` decorations (and anything else you want — subscribe to events, register Cell subclasses, etc.). Trellis auto-discovers it on `import trellis`. A broken plugin warns and is skipped; others still load. Set `TRELLIS_DISABLE_PLUGIN_DISCOVERY=1` to opt out. Full story in [docs/plugin-example.md](docs/plugin-example.md).
+
+### 5. Supply a TUI keymap (frontend hook)
+
+The terminal app has its own extension point: a **keymap** — a whole key language for the grid (the built-in Excel bindings are themselves one). A keymap package registers a factory under the `trellis_tui.keymaps` entry point and users select it with `trellis --keymap NAME`. The contract (`trellis_tui.keymap`: `Keymap.handle(KeyPress, KeyContext) -> Action | None`) is textual-free and read-only toward the app — the keymap names what a key *means*; the app executes it. See [trellis-tui](packages/trellis-tui)'s README. This is a frontend hook, not an engine one: the core knows nothing of it.
 
 ## License
 

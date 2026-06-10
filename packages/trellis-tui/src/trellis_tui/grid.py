@@ -42,13 +42,13 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from rich.text import Text
-from textual.binding import Binding
 from textual.coordinate import Coordinate
 from textual.message import Message
 from textual.widgets import DataTable
 
 from trellis import Sheet, to_a1
 
+from . import keymap as km
 from .render import display
 
 __all__ = ["Rect", "SheetGrid", "col_letters", "values_equal"]
@@ -160,38 +160,14 @@ class SheetGrid(DataTable):
     #: must compose with content styling (error red stays readable).
     SELECTION_STYLE = "on grey37"
 
-    BINDINGS = [
-        Binding("ctrl+home", "cursor_a1", "A1", show=False),
-        Binding("f2", "request_revise", "Edit"),
-        Binding("enter", "request_revise", "Edit", show=False),  # nav-Enter = revise (DECIDED #5); overrides DataTable's select binding
-        Binding("delete", "request_clear", "Clear"),
-        Binding("backspace", "request_replace_empty", "Clear+edit", show=False),
-        # Selection (Part 6 #4). DataTable binds none of these.
-        Binding("shift+up", "extend(-1, 0)", "Extend", show=False),
-        Binding("shift+down", "extend(1, 0)", "Extend", show=False),
-        Binding("shift+left", "extend(0, -1)", "Extend", show=False),
-        Binding("shift+right", "extend(0, 1)", "Extend", show=False),
-        Binding("ctrl+a", "select_all", "Select all", show=False),
-        Binding("escape", "collapse_selection", "Deselect", show=False),
-        # Clipboard (Part 6 #5). Bound on the grid, not the app: while
-        # the CellEditor has focus, Input's own ctrl+c/v handle text
-        # editing; the app's default ctrl+c (help_quit) is non-priority
-        # so the focused grid wins.
-        Binding("ctrl+c", "request_copy", "Copy", show=False),
-        Binding("ctrl+x", "request_cut", "Cut", show=False),
-        Binding("ctrl+v", "request_paste", "Paste", show=False),
-        # Undo/redo (Part 7 #4). Grid-bound for the same reason as the
-        # clipboard keys: while the CellEditor has focus, Ctrl+Z must
-        # not touch the sheet.
-        Binding("ctrl+z", "request_undo", "Undo", show=False),
-        Binding("ctrl+y", "request_redo", "Redo", show=False),
-        Binding("ctrl+shift+z", "request_redo", "Redo", show=False),
-        # Fill (Part 8). Excel's keyboard fill, grid-bound like the
-        # clipboard keys: while editing, Input's own ctrl+d (delete
-        # right) keeps working on text instead of touching the sheet.
-        Binding("ctrl+d", "request_fill('down')", "Fill down", show=False),
-        Binding("ctrl+r", "request_fill('right')", "Fill right", show=False),
-    ]
+    # Part 10: NO grid-key BINDINGS anymore — every key the focused grid
+    # sees routes through the active keymap (on_key below), the one key
+    # path (DECIDED #6). The Excel bindings that used to live here are
+    # ported verbatim into keymap.ExcelKeymap; DataTable's own cursor
+    # bindings are suppressed the same way (an Action prevents default).
+    # Grid-binding the keys was the Part 6-8 isolation trick for the
+    # editor (Input's own ctrl+c/d/z keep working while editing) — the
+    # keymap path keeps that for free: an unfocused grid sees no keys.
 
     def __init__(self, sheet: Sheet, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -277,12 +253,11 @@ class SheetGrid(DataTable):
         self._extend_moves += 1
         self.move_cursor(row=row, column=col)
 
-    def action_select_all(self) -> None:
-        """Ctrl+A: select ``used_range()`` (no-op on an empty sheet)."""
-        bounds = self.sheet.used_range()
-        if bounds is None:
-            return
-        (r0, c0), (r1, c1) = bounds
+    def select_rect(self, rect) -> None:
+        """Set the selection to ``rect`` outright: anchor at the
+        top-left, cursor to the bottom-right (Ctrl+A's machinery,
+        generalised for the keymap ``Select`` action — Part 10)."""
+        (r0, c0), (r1, c1) = rect
         self._sel_anchor = (r0, c0)
         cursor = self.cursor_coordinate
         if (cursor.row, cursor.column) == (r1, c1):
@@ -293,6 +268,13 @@ class SheetGrid(DataTable):
         else:
             self._extend_moves += 1
             self.move_cursor(row=r1, column=c1)
+
+    def action_select_all(self) -> None:
+        """Ctrl+A: select ``used_range()`` (no-op on an empty sheet)."""
+        bounds = self.sheet.used_range()
+        if bounds is None:
+            return
+        self.select_rect(bounds)
 
     def action_collapse_selection(self) -> None:
         """Esc: collapse the selection (the cursor stays put). Always
@@ -531,14 +513,51 @@ class SheetGrid(DataTable):
             self.rect = rect
             super().__init__()
 
+    class ActionRequest(Message):
+        """A keymap-returned ``Action`` for the app's shared executor
+        (Part 10). The same request-message shape as every other grid
+        intent — the grid still never writes the engine."""
+
+        def __init__(self, action: km.Action) -> None:
+            self.action = action
+            super().__init__()
+
+    def key_context(self) -> km.KeyContext:
+        """The read-only state the active keymap sees (Part 10)."""
+        cursor = self.cursor_coordinate
+        region = self.scrollable_content_region
+        return km.KeyContext(
+            mode=getattr(self.app, "mode", "default"),
+            cursor=(cursor.row, cursor.column),
+            selection=self.selection_range,
+            used_range=self.sheet.used_range(),
+            cell=lambda row, col: self.sheet[to_a1(row, col)],
+            viewport_rows=max(1, region.height - 1),  # minus the header
+            viewport_cols=max(1, region.width // self.COL_WIDTH),
+            editing=False,  # the grid has focus, so the editor doesn't
+        )
+
     def on_key(self, event) -> None:
-        # Any printable character starts a replace-edit seeded with it
-        # (Excel: typing overwrites). Navigation keys fall through to the
-        # DataTable bindings untouched.
-        if event.is_printable and event.character:
-            event.stop()
-            event.prevent_default()
-            self.post_message(self.EditRequest("replace", event.character))
+        # The one key path (Part 10, DECIDED #6): every key the focused
+        # grid sees goes to the active keymap. An Action stops the event
+        # (suppressing DataTable's own bindings) and rides the normal
+        # request-message channel to the app's executor; None lets the
+        # key run on to the framework (paging, focus) and the app's
+        # chrome bindings (Ctrl+S/Q/T/W… — DECIDED #7). Insert mode
+        # bypasses all of this: while the editor has focus, the grid
+        # sees no keys at all.
+        keymap = getattr(self.app, "active_keymap", None)
+        if keymap is None:
+            return  # bare harness without the TrellisApp shell
+        press = km.KeyPress.parse(
+            event.key, event.character if event.is_printable else None
+        )
+        action = keymap.handle(press, self.key_context())
+        if action is None:
+            return
+        event.stop()
+        event.prevent_default()
+        self.post_message(self.ActionRequest(action))
 
     def action_request_revise(self) -> None:
         self.post_message(self.EditRequest("revise"))

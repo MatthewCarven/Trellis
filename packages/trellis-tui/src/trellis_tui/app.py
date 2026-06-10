@@ -67,6 +67,18 @@ empty sources clear their targets), all ONE batch — one echo, one
 dirty mark, one undo step. No clipboard involvement: a fill never
 disturbs copied cells or a pending cut's snapshot (though the cut
 disarms, as on any engine change).
+
+Keymaps (Part 10, building): grid keys live behind the TUI's first
+extension point. ``app.active_keymap`` answers every key the focused
+grid sees with an ``Action`` (``keymap.py`` — the textual-free
+contract), and the app's shared ``_execute`` performs it. The default
+is the built-in ``ExcelKeymap`` — one path, Excel is a keymap too
+(DECIDED #6) — and ``--keymap NAME`` selects an entry-point-registered
+alternative (``--vim`` is sugar for ``--keymap vim``). Chrome keys
+(save/quit/sheet tabs) stay app bindings (DECIDED #7) but emit the
+same Actions through the same executor, so a keymap's ``:w``/``:q``
+verbs reach identical code. The keymap's mode rides the status bar
+(``-- INSERT --``); the resting mode renders as nothing.
 """
 
 from __future__ import annotations
@@ -96,6 +108,7 @@ from trellis import Cell, Sheet, Workbook, read_csv, shift_formula, to_a1
 from trellis_undo import attach as attach_undo, detach as detach_undo
 
 from . import __version__
+from . import keymap as km
 from .editor import CellEditor, FormulaBar, commit_text, prefill_text
 from .grid import SheetGrid
 from .render import display
@@ -173,6 +186,10 @@ class StatusBar(Static):
     ``state`` mirrors what's rendered, as plain values ``(file_label,
     dirty, message)`` — for tests and curious code. Passing
     ``message=None`` to :meth:`show` keeps the previous message.
+    ``mode`` (Part 10) renders as a leading ``-- MODE --`` segment and
+    is mirrored at ``mode_shown``; the empty string renders nothing
+    (the keymap's resting mode). Deliberately NOT in ``state`` — the
+    3-tuple is load-bearing for existing tests and curious code.
     """
 
     DEFAULT_CSS = """
@@ -185,12 +202,22 @@ class StatusBar(Static):
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)
         self.state: tuple[str, bool, str] = ("", False, "")
+        self.mode_shown: str = ""
 
-    def show(self, path: str | None, dirty: bool, message: str | None = None) -> None:
+    def show(
+        self,
+        path: str | None,
+        dirty: bool,
+        message: str | None = None,
+        mode: str = "",
+    ) -> None:
         label = path or "(no file)"
         kept = self.state[2] if message is None else message
         self.state = (label, dirty, kept)
+        self.mode_shown = mode
         line = Text()
+        if mode:
+            line.append(f"-- {mode.upper()} --  ", style="bold yellow")
         line.append(label, style="bold")
         if dirty:
             line.append("  ● modified", style="yellow")
@@ -311,6 +338,7 @@ class TrellisApp(App):
         *,
         path: str | None = None,
         paths: dict[str, str] | None = None,
+        keymap: km.Keymap | None = None,
     ) -> None:
         super().__init__()
         self.workbook = workbook if workbook is not None else _empty_workbook()
@@ -338,6 +366,15 @@ class TrellisApp(App):
         #: text mirror, which #6 feeds via copy_to_clipboard). Public —
         #: the same object a REPL poking at the app would want to see.
         self.sheet_clipboard: Clipboard | None = None
+        #: The active keymap (Part 10): the sole authority for every key
+        #: the focused grid sees. Public — a REPL can swap it live.
+        self.active_keymap: km.Keymap = (
+            keymap if keymap is not None else km.ExcelKeymap()
+        )
+        #: The keymap's current mode name. ``EnterMode`` actions and the
+        #: editor lifecycle move it; the status bar renders it (the
+        #: keymap's ``initial_mode()`` renders as nothing).
+        self.mode: str = self.active_keymap.initial_mode()
 
     # ------------------------------------------------- active-view facade
     #
@@ -444,7 +481,18 @@ class TrellisApp(App):
     def _refresh_status(self, message: str | None = None) -> None:
         bars = self.query(StatusBar)  # defensive: events can outlive widgets
         if bars:
-            bars.first().show(self.path, self.dirty, message)
+            bars.first().show(
+                self.path, self.dirty, message, mode=self._mode_label()
+            )
+
+    def _mode_label(self) -> str:
+        return "" if self.mode == self.active_keymap.initial_mode() else self.mode
+
+    def _set_mode(self, name: str) -> None:
+        """Track the keymap mode (Part 10); the status bar re-renders."""
+        if name != self.mode:
+            self.mode = name
+            self._refresh_status(None)
 
     def _tab_for(self, view: SheetView) -> Tab | None:
         tabs = self.query(Tabs)
@@ -493,8 +541,11 @@ class TrellisApp(App):
 
     # ------------------------------------------------------------- save
 
-    def action_save(self) -> None:
-        if self.path:
+    async def action_save(self) -> None:
+        await self._execute(km.Save())
+
+    def _save_gesture(self, prompt: bool = False) -> None:
+        if self.path and not prompt:
             self._save_to(self.path)
         else:
             self.push_screen(SaveAsScreen(), callback=self._save_dialog_done)
@@ -523,6 +574,12 @@ class TrellisApp(App):
     # ------------------------------------------------------------- quit
 
     async def action_quit(self) -> None:
+        await self._execute(km.Quit())
+
+    async def _quit_gesture(self, force: bool = False) -> None:
+        if force:
+            self.exit()
+            return
         unsaved = sum(1 for view in self.views if view.dirty)
         if unsaved and not self._quit_armed:
             self._quit_armed = True
@@ -599,11 +656,11 @@ class TrellisApp(App):
         target = self.views[(index + step) % len(self.views)]
         self.query_one(Tabs).active = f"tab-{target.uid}"
 
-    def action_next_sheet(self) -> None:
-        self._cycle_sheet(1)
+    async def action_next_sheet(self) -> None:
+        await self._execute(km.Sheet("next"))
 
-    def action_prev_sheet(self) -> None:
-        self._cycle_sheet(-1)
+    async def action_prev_sheet(self) -> None:
+        await self._execute(km.Sheet("prev"))
 
     def action_new_sheet(self) -> None:
         """Ctrl+T: a new pathless sheet, named SheetN (first free N) —
@@ -699,6 +756,88 @@ class TrellisApp(App):
         self._sync_chrome()
         self._refresh_status(f"renamed {old} → {name}")
 
+    # ------------------------------------------- the action executor (Part 10)
+
+    async def _execute(self, action: km.Action) -> None:
+        """The shared Action executor — every gesture lands here, whether
+        the active keymap answered a grid key with it or an app-chrome
+        binding emitted it (DECIDED #7: same Actions, same code). The
+        keymap never writes; this is where Actions become cursor moves,
+        engine writes, and chrome. Targets (``rect=None``) resolve HERE,
+        at execution time: queued actions run in order, so the selection
+        a prior ``Move(extend=True)`` grew is the one an ``Operate``
+        sees, however fast the keys came in."""
+        grid = self.active_view.grid
+        if isinstance(action, (km.Move, km.MoveTo)):
+            if grid is None:
+                return
+            if isinstance(action, km.Move):
+                cursor = grid.cursor_coordinate
+                row, col = cursor.row + action.dr, cursor.column + action.dc
+            else:
+                row, col = action.row, action.col
+            row = min(max(row, 0), grid.row_count - 1)
+            col = min(max(col, 0), len(grid.columns) - 1)
+            if action.extend:
+                grid._extend_cursor_to(row, col)
+            else:
+                grid.move_cursor(row=row, column=col)
+        elif isinstance(action, km.Select):
+            if grid is not None:
+                grid.select_rect(action.rect)
+        elif isinstance(action, km.BeginEdit):
+            mode = "revise" if action.seed is None else "replace"
+            self._start_edit(mode, action.seed or "", caret=action.caret)
+        elif isinstance(action, km.EnterMode):
+            self._set_mode(action.name)
+            if grid is not None and action.name == self.active_keymap.initial_mode():
+                # The Esc contract: entering the resting mode collapses
+                # the selection and cancels a pending cut.
+                grid.action_collapse_selection()
+        elif isinstance(action, km.Operate):
+            if grid is None:
+                return
+            if action.op == "clear":
+                # Selection-or-cursor, preserving the single-cell
+                # no-batch path exactly as the ClearRequest always has.
+                self._clear(action.rect or grid.selection_range)
+                return
+            rect = action.rect or grid.selection_range or grid.cursor_rect()
+            if action.op == "copy":
+                self._copy(rect)
+            elif action.op == "cut":
+                self._cut(rect)
+            elif action.op == "paste":
+                self._paste_internal(rect)
+            elif action.op == "change":
+                self._clear(rect)  # vim's c: clear, then a replace-edit
+                self._start_edit("replace", "")
+        elif isinstance(action, km.Fill):
+            if grid is None:
+                return
+            rect = action.rect or grid.selection_range or grid.cursor_rect()
+            self._fill(rect, action.axis)
+        elif isinstance(action, km.Undo):
+            self._undo()
+        elif isinstance(action, km.Redo):
+            self._redo()
+        elif isinstance(action, km.Save):
+            self._save_gesture(action.prompt)
+        elif isinstance(action, km.Quit):
+            await self._quit_gesture(action.force)
+        elif isinstance(action, km.Sheet):
+            self._cycle_sheet(1 if action.direction == "next" else -1)
+        elif isinstance(action, km.Hint):
+            if action.msg:
+                self._refresh_status(action.msg)
+        # Unknown Action subclasses get silence, not magic — the
+        # vocabulary is closed by convention (keymap.py).
+
+    async def on_sheet_grid_action_request(
+        self, message: SheetGrid.ActionRequest
+    ) -> None:
+        await self._execute(message.action)
+
     # ------------------------------------------------------ cursor mirror
 
     def on_data_table_cell_highlighted(self, event) -> None:
@@ -777,19 +916,23 @@ class TrellisApp(App):
             return to_a1(r0, c0)
         return f"{to_a1(r0, c0)}:{to_a1(r1, c1)}"
 
-    def on_sheet_grid_copy_request(self, message: SheetGrid.CopyRequest) -> None:
-        clip = self._snapshot(message.rect, "copy")
+    def _copy(self, rect) -> None:
+        clip = self._snapshot(rect, "copy")
         self.sheet_clipboard = clip
         self.copy_to_clipboard(clip.tsv)  # OS mirror out (OSC 52)
-        self._refresh_status(f"copied {self._rect_label(message.rect)}")
+        self._refresh_status(f"copied {self._rect_label(rect)}")
 
-    def on_sheet_grid_cut_request(self, message: SheetGrid.CutRequest) -> None:
-        clip = self._snapshot(message.rect, "cut")
+    def _cut(self, rect) -> None:
+        clip = self._snapshot(rect, "cut")
         self.sheet_clipboard = clip
         self.copy_to_clipboard(clip.tsv)
-        self._refresh_status(
-            f"cut {self._rect_label(message.rect)} — paste moves it"
-        )
+        self._refresh_status(f"cut {self._rect_label(rect)} — paste moves it")
+
+    def on_sheet_grid_copy_request(self, message: SheetGrid.CopyRequest) -> None:
+        self._copy(message.rect)
+
+    def on_sheet_grid_cut_request(self, message: SheetGrid.CutRequest) -> None:
+        self._cut(message.rect)
 
     def on_sheet_grid_cancel_request(
         self, message: SheetGrid.CancelRequest
@@ -806,7 +949,7 @@ class TrellisApp(App):
 
     # --------------------------------------------------------------- undo
 
-    def on_sheet_grid_undo_request(self, message: SheetGrid.UndoRequest) -> None:
+    def _undo(self) -> None:
         """One step back. The restore is an engine write like any other:
         the grid repaints via the echo, dirty marks honestly."""
         count = self.undo_log.undo()
@@ -815,12 +958,18 @@ class TrellisApp(App):
         else:
             self._refresh_status(f"undid {count} cell{'' if count == 1 else 's'}")
 
-    def on_sheet_grid_redo_request(self, message: SheetGrid.RedoRequest) -> None:
+    def _redo(self) -> None:
         count = self.undo_log.redo()
         if count is None:
             self._refresh_status("nothing to redo")
         else:
             self._refresh_status(f"redid {count} cell{'' if count == 1 else 's'}")
+
+    def on_sheet_grid_undo_request(self, message: SheetGrid.UndoRequest) -> None:
+        self._undo()
+
+    def on_sheet_grid_redo_request(self, message: SheetGrid.RedoRequest) -> None:
+        self._redo()
 
     def _paste_internal(self, rect) -> None:
         """Paste the internal clipboard into the target rect, ONE batch.
@@ -1020,12 +1169,15 @@ class TrellisApp(App):
         self._start_edit(message.mode, message.seed)
 
     def on_sheet_grid_clear_request(self, message: SheetGrid.ClearRequest) -> None:
-        if message.rect is not None:
+        self._clear(message.rect)
+
+    def _clear(self, rect) -> None:
+        if rect is not None:
             # Delete with a live selection: every cell in the rectangle,
             # in ONE batch — one event echo, one recalc pass, one dirty
             # mark. (An all-empty rectangle emits nothing: the engine
             # skips empty batches, so deleting nothing dirties nothing.)
-            (r0, c0), (r1, c1) = message.rect
+            (r0, c0), (r1, c1) = rect
             with self.sheet.batch():
                 for row in range(r0, r1 + 1):
                     for col in range(c0, c1 + 1):
@@ -1035,7 +1187,7 @@ class TrellisApp(App):
         cursor = grid.cursor_coordinate
         commit_text(self.sheet, (cursor.row, cursor.column), "")  # delete
 
-    def _start_edit(self, mode: str, seed: str = "") -> None:
+    def _start_edit(self, mode: str, seed: str = "", caret: str = "end") -> None:
         if self._edit_addr is not None:
             return
         grid = self.active_view.grid
@@ -1049,6 +1201,11 @@ class TrellisApp(App):
             self._edit_prefill = None
         self._edit_addr = address
         self.query_one(FormulaBar).start_edit(to_a1(*address), prefill)
+        if caret == "start":
+            # BeginEdit(caret="start") — vim's ``i``/``I``; the bar
+            # parks the caret at the end by default (Excel's F2).
+            self.query_one(CellEditor).cursor_position = 0
+        self._set_mode("insert")  # the editor IS Insert (Part 10)
 
     def on_cell_editor_done(self, message: CellEditor.Done) -> None:
         address = self._edit_addr
@@ -1062,6 +1219,7 @@ class TrellisApp(App):
 
         bar = self.query_one(FormulaBar)
         bar.end_edit()
+        self._set_mode(self.active_keymap.initial_mode())
         if message.commit and not unchanged_revise:
             # The single write path. Never blocks: a broken formula
             # commits as its error value (formula preserved for F2).
@@ -1099,15 +1257,37 @@ def build_app(args: list[str]) -> TrellisApp | None:
     loaded via ``read_csv(…, workbook=…)`` — the multi-file seam the
     engine grew in Part 3, consumed at last. A path that doesn't exist
     yet opens an empty tab with the path remembered — ``Ctrl+S``
-    creates the file."""
+    creates the file.
+
+    ``--keymap NAME`` selects the key language (Part 10): the built-in
+    ``excel`` (default) or any keymap registered under the
+    ``trellis_tui.keymaps`` entry point. ``--vim`` is sugar for
+    ``--keymap vim``. An unknown name prints what IS available."""
     if "--version" in args:
         print(f"trellis-tui {__version__}")
         return None
-    if not args:
-        return TrellisApp(None)
+    keymap_name = "excel"
+    files: list[str] = []
+    rest = iter(args)
+    for arg in rest:
+        if arg == "--vim":
+            keymap_name = "vim"
+        elif arg == "--keymap":
+            keymap_name = next(rest, None) or ""
+        elif arg.startswith("--keymap="):
+            keymap_name = arg.split("=", 1)[1]
+        else:
+            files.append(arg)
+    try:
+        keymap = km.load_keymap(keymap_name)
+    except KeyError as error:
+        print(error.args[0])
+        return None
+    if not files:
+        return TrellisApp(None, keymap=keymap)
     workbook = Workbook()
     paths: dict[str, str] = {}
-    for arg in args:
+    for arg in files:
         name = _unique_sheet_name(paths, Path(arg).stem)
         if Path(arg).exists():
             # formulas=True mirrors save: =-cells load live, so a file
@@ -1116,7 +1296,7 @@ def build_app(args: list[str]) -> TrellisApp | None:
         else:
             workbook.add_sheet(name)
         paths[name] = arg
-    return TrellisApp(workbook, paths=paths)
+    return TrellisApp(workbook, paths=paths, keymap=keymap)
 
 
 def main(argv: list[str] | None = None) -> int:
