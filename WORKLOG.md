@@ -3,6 +3,34 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-12 — Session 39: PART 10 ROW 4 — contract doc + FIELD CHECK PASSED; PART 10 COMPLETE
+
+**Context:** pickup session. Matthew ran the field check live mid-session.
+
+**Field check first (it gated everything):** initial `trellis --vim` failed with the designed
+helpful error (`unknown keymap 'vim' (available: excel)`) — root cause NOT a discovery bug but a
+venv built before row 3; `pip install -e packages\trellis-tui-vim` into the live venv fixed it.
+Then all three S35-rule items passed on Windows Terminal: **Esc timing instant** (insert -> normal,
+no terminal delay; Ctrl+C-as-Esc held), **`:` echo UX good** (echo/backspace/dirty-warn/`:q!`/
+unsupported-command echo), **printables sane** (normal-mode letters are commands, unbound letters
+inert). Matthew's verdict: "works well... I'm happy". **Part 10 closes field-verified** — the
+S35 rule satisfied for the third time (Alt+R, the ScrollView theft, now this venv-staleness find).
+
+**docs/keymap-plugin.md (157 lines)** — the contract doc, plugin-example.md's sibling for the
+frontend hook: the minimal toy keymap, the three disciplines (keymap-never-writes / textual-free /
+execution-time rects), KeyPress/KeyContext, the full Action table (incl. Chain and the Hint("")
+deaden), state-and-modes (app is the mode authority; instance holds only what nobody else can),
+entry-point shipping + the available_keymaps() smoke test + the stale-venv field note, and the
+hermetic-testing story (26-in-0.2s vs 9 Pilot — copy that ratio).
+
+**Close-out:** design.md row 4 marked DONE + S39 field-check addendum (PART 10 COMPLETE);
+root README Extending #5 links the doc. Written off-mount per the write protocol, sha256-verified.
+
+**PART 10 COMPLETE.** The monorepo now ships three proven extension styles with docs for each.
+NEXT per pull list: xlsx (deprioritized), or whatever the field suggests. Also pending on
+Matthew's side: push (origin is 2 behind after this session's commit).
+
+---
 ## 2026-06-11 — Session 38 (later): PART 10 ROW 3 — trellis-tui-vim, the reference keymap plugin
 
 **Context:** row 2 pushed (origin = 1b49f9f) and Matthew said continue — row 3 in the same session, the Part 6/9 same-day rhythm. The third reference package ships: the monorepo now brackets all three extension styles (mathpack = entry-point globals, trellis-undo = events+meta, trellis-tui-vim = a frontend strategy hook).

@@ -1235,7 +1235,7 @@ the suite green (Part 9's active-view move).
 | 1 | This design pass + the contract — **DONE (S37)** | design.md Part 10 (+ docs/keymap-plugin.md at row 4) |
 | 2 | Keymap layer in trellis-tui: the delegate + Action executor (incl. `Fill`) + `KeyContext` + mode state/`-- MODE --` indicator + entry-point discovery + `--keymap`/`--vim`. **Port the current bindings into the built-in `ExcelKeymap` (default active); 175 tests are the net.** Possibly two sessions if the port is gnarly. — **DONE (S38**, one session: the port came in clean, 175 untouched + 20 contract tests**)** | trellis-tui |
 | 3 | `packages/trellis-tui-vim/`: the vim `Keymap` — modes, motions, operators, command-line — via the entry point. + hermetic tests — **DONE (S38**, same session as row 2: 26 hermetic + 9 Pilot tests; install-level discovery proved in an off-mount venv**)** | new package |
-| 4 | Docs (both READMEs, the contract doc, design rows) + worklog; then **field-verify** (Windows Terminal) | docs + Matthew |
+| 4 | Docs (both READMEs, the contract doc, design rows) + worklog; then **field-verify** (Windows Terminal) — **DONE (S39**, 2026-06-12: docs/keymap-plugin.md written; field check PASSED — see addendum**)** | docs + Matthew |
 
 Rows land green before the next starts — the Part 6/9 rhythm.
 
@@ -1302,3 +1302,15 @@ Rows land green before the next starts — the Part 6/9 rhythm.
 - Part 7 — one-batch-one-step undo (`u`/`Ctrl+r`). Part 8 — the `Ctrl+D`/`Ctrl+R` fill keys.
 - mathpack — entry-point discovery; `render.py` — the textual-free precedent; Part 9 — facade-keeps-suite-green.
 - `app._editing()`, `grid.py` BINDINGS — the Normal/Insert seam and the keys being ported.
+## Field check (S39, 2026-06-12) — PART 10 CLOSES VERIFIED
+Matthew, Windows Terminal, `trellis --vim demo.csv`. All three S35-rule items pass:
+- **Esc timing:** `i` -> `-- INSERT --`, Esc back to normal instantly — no terminal Esc-delay.
+  Ctrl+C while editing behaves as Esc (never falls through to quit).
+- **The `:` echo UX:** keystroke echo + backspace feel like a command line; `:q` dirty-warns,
+  `:q!` quits, unsupported commands echo (modal honesty held in the field).
+- **Printable-swallowing:** normal-mode letters are commands, unbound letters inert — no
+  type-to-edit leakage.
+One install finding (not a code bug): a venv built before row 3 doesn't see the new package —
+the helpful-failure path (`unknown keymap 'vim' (available: excel)`) fired exactly as designed,
+fixed with `pip install -e packages/trellis-tui-vim`. Noted in docs/keymap-plugin.md.
+PART 10 COMPLETE.

@@ -137,7 +137,7 @@ mathpack = "trellis_mathpack:setup"
 
 ### 5. Supply a TUI keymap (frontend hook)
 
-The terminal app has its own extension point: a **keymap** — a whole key language for the grid (the built-in Excel bindings are themselves one). A keymap package registers a factory under the `trellis_tui.keymaps` entry point and users select it with `trellis --keymap NAME`. The contract (`trellis_tui.keymap`: `Keymap.handle(KeyPress, KeyContext) -> Action | None`) is textual-free and read-only toward the app — the keymap names what a key *means*; the app executes it. The reference: [trellis-tui-vim](packages/trellis-tui-vim) (`trellis --vim`), a full vim language — modes, counts, operators, the `:` command line — in ~450 lines that import only the contract. This is a frontend hook, not an engine one: the core knows nothing of it.
+The terminal app has its own extension point: a **keymap** — a whole key language for the grid (the built-in Excel bindings are themselves one). A keymap package registers a factory under the `trellis_tui.keymaps` entry point and users select it with `trellis --keymap NAME`. The contract (`trellis_tui.keymap`: `Keymap.handle(KeyPress, KeyContext) -> Action | None`) is textual-free and read-only toward the app — the keymap names what a key *means*; the app executes it. The reference: [trellis-tui-vim](packages/trellis-tui-vim) (`trellis --vim`), a full vim language — modes, counts, operators, the `:` command line — in ~450 lines that import only the contract. This is a frontend hook, not an engine one: the core knows nothing of it. Contract doc: [docs/keymap-plugin.md](docs/keymap-plugin.md).
 
 ## License
 
