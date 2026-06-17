@@ -1,11 +1,11 @@
 """trellis-tui-vim — the vim keymap for the Trellis TUI (design.md Part 10).
 
 The reference *keymap plugin*: a whole alternative key language behind
-the TUI's keymap hook, registered under the ``trellis_tui.keymaps``
+the TUI's keymap hook, registered under the ``trellis_keymap.keymaps``
 entry point and selected with ``trellis --vim`` (or ``--keymap vim``).
 It proves the hook from outside the way mathpack proves the engine's
 entry point — this package imports ONLY the contract
-(``trellis_tui.keymap``), never textual, never the app.
+(``trellis_keymap``), never textual, never the app.
 
 The shape of the thing: the TUI was already half-modal (Insert = the
 formula-bar editor, Visual = the selection model, Normal = grid focus),
@@ -46,7 +46,7 @@ core part), search, ``f``/``t``, marks, registers, macros, ``.``.
 
 from __future__ import annotations
 
-from trellis_tui.keymap import (
+from trellis_keymap import (
     Action,
     BeginEdit,
     Chain,
@@ -178,7 +178,7 @@ _KEY_TABLE: list[KeyRow] = [
 
 
 class VimKeymap:
-    """The vim key language as a ``trellis_tui.keymap.Keymap``.
+    """The vim key language as a ``trellis_keymap.Keymap``.
 
     One stateful instance per session. The *mode* lives in the app
     (``EnterMode`` actions move it; the context echoes it back) — the

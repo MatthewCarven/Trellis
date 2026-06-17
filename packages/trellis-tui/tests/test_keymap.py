@@ -149,7 +149,7 @@ def test_entry_point_cannot_shadow_builtin(monkeypatch):
         def load():  # pragma: no cover - must never be called the winner
             return lambda: "shadowed"
 
-    monkeypatch.setattr(km, "entry_points", lambda group: [FakeEP()])
+    monkeypatch.setattr("trellis_keymap.entry_points", lambda group: [FakeEP()])
     assert isinstance(km.available_keymaps()["excel"](), km.ExcelKeymap)
 
 

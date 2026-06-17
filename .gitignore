@@ -57,3 +57,6 @@ desktop.ini
 
 # Local-only insurance snapshot of Claude auto-memory — not for the public repo
 .memory-backup/
+
+# Field-check / scratch CSVs (demo.csv is tracked; this catches demo2.csv, demo3.csv, ...)
+demo[0-9]*.csv

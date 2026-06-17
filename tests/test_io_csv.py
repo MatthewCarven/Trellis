@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+import os
+import stat
+import sys
 
 import pytest
 
@@ -545,3 +548,72 @@ class TestFormulasFlag:
         sh2 = read_csv(out, formulas=True)["Sheet1"]
         assert sh2["C1"].formula == "=SUM(A1,B1)"
         assert sh2["C1"].value == 3
+
+
+# ---------------------------------------------------------------------
+# write_csv atomicity: temp file + os.replace (CSV-path polish, S40)
+# ---------------------------------------------------------------------
+
+
+class TestWriteCSVAtomic:
+    """Saves go to a temp file beside the target, then os.replace into place."""
+
+    def test_success_leaves_no_temp_litter(self, tmp_path):
+        sh = Sheet("S")
+        sh["A1"] = "a"
+        sh["B1"] = 1
+        out = tmp_path / "out.csv"
+        write_csv(sh, out)
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["out.csv"]
+        assert out.read_text(encoding="utf-8").splitlines() == ["a,1"]
+
+    def test_empty_sheet_atomic_no_litter(self, tmp_path):
+        sh = Sheet("E")
+        out = tmp_path / "e.csv"
+        write_csv(sh, out)
+        assert out.read_text(encoding="utf-8") == ""
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["e.csv"]
+
+    def test_failed_write_preserves_original_and_cleans_up(
+        self, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "keep.csv"
+        good = Sheet("G")
+        good["A1"] = "original"
+        write_csv(good, out)
+        assert out.read_text(encoding="utf-8").splitlines() == ["original"]
+
+        def boom(_v):
+            raise RuntimeError("serialize failed")
+
+        monkeypatch.setattr("trellis.io.csv._stringify", boom)
+        doomed = Sheet("D")
+        doomed["A1"] = "data-that-never-lands"
+        with pytest.raises(RuntimeError, match="serialize failed"):
+            write_csv(doomed, out)
+
+        # original file untouched, and no half-written temp left behind
+        assert out.read_text(encoding="utf-8").splitlines() == ["original"]
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.csv"]
+
+    def test_overwrite_truncates_stale_tail(self, tmp_path):
+        # A short second write must not leave bytes from a longer first write.
+        out = tmp_path / "o.csv"
+        first = Sheet("A")
+        first["A1"] = "aaaaaaaaaaaaaaaaaaaa"
+        first["A2"] = "bbbbbbbbbbbbbbbbbbbb"
+        write_csv(first, out)
+        second = Sheet("B")
+        second["A1"] = "x"
+        write_csv(second, out)
+        assert out.read_text(encoding="utf-8").splitlines() == ["x"]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+    def test_permissions_preserved_on_overwrite(self, tmp_path):
+        out = tmp_path / "perm.csv"
+        sh = Sheet("S")
+        sh["A1"] = "v"
+        write_csv(sh, out)
+        os.chmod(out, 0o640)
+        write_csv(sh, out)  # overwrite must preserve the 0o640 mode
+        assert stat.S_IMODE(os.stat(out).st_mode) == 0o640

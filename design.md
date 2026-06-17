@@ -1314,3 +1314,74 @@ One install finding (not a code bug): a venv built before row 3 doesn't see the 
 the helpful-failure path (`unknown keymap 'vim' (available: excel)`) fired exactly as designed,
 fixed with `pip install -e packages/trellis-tui-vim`. Noted in docs/keymap-plugin.md.
 PART 10 COMPLETE.
+
+
+## Part 11 — CSV-path I/O polish
+Status: **opened 2026-06-17 Session 40.** Post-Part-10 milestone: harden the file path the
+target user actually lives on (CSV, by design — [[trellis-file-io-csv-only]]). Candidates came
+from auditing `io/csv.py` against real Excel-on-Windows behaviour; none were previously in scope.
+Picked order (Matthew, S40): atomic save first, then read robustness, then graceful open errors.
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | `write_csv` atomic (temp + `os.replace`) | DONE 2026-06-17 (S40) |
+| 2 | Read robustness — UTF-8 BOM + delimiter sniff | planned |
+| 3 | Graceful open errors in the TUI CLI path | planned |
+
+### Row 1 — atomic save (DONE 2026-06-17, S40)
+**Problem.** `write_csv` opened the destination directly with `"w"`: a save interrupted partway
+(disk full, crash, a flaky mount — the very failure the repo's own write-protocol guards against)
+truncated the user's real file. A spreadsheet editor must never lose the old file to a bad new one.
+
+**Shape.** Stream into a temp file in the *same directory* as the target (so the replace is a
+same-filesystem rename, not a cross-device copy), then `os.replace(tmp, target)` — atomic on POSIX
+and Windows. On any exception the temp is unlinked and the error re-raised; the original is never
+touched. The empty-sheet branch shares the path (empty file, still atomic). Temp names are
+`.<target>.*.tmp` — hidden, and matching the repo's existing `*.tmp` ignore.
+
+**Permissions.** `mkstemp` makes its file 0600, which would leak through the replace.
+`_apply_target_mode` restores what `open(path, "w")` would have produced: copy an existing file's
+mode on overwrite, else `0o666 & ~umask` for a new file. Best-effort (OSError swallowed), POSIX-
+shaped, a no-op on Windows — a permission quirk must never defeat an otherwise-good save.
+
+**Tests (+5; core 816 -> 821).** No temp litter after success; a mid-serialize failure
+(monkeypatched `_stringify`) leaves the original intact, leaves no litter, and propagates; empty-
+sheet write stays atomic; a short overwrite truncates a longer file's stale tail; (POSIX) mode
+0640 preserved across overwrite. No API or happy-path change — pure durability.
+
+
+## trellis-keymap — the keymap contract becomes its own package (2026-06-17, S40)
+Status: **DONE.** Extracted the textual-free keymap contract out of `trellis-tui` into a new
+zero-dependency package, so a second frontend (a planned GUI — Matthew is eyeing DearPyGui) can
+host the same Excel/vim key languages without dragging in Textual.
+
+**Why now.** The contract was textual-free by design (Part 10 decision 8) but *housed* inside
+`trellis-tui`. A new frontend would otherwise depend on the whole TUI (pulling Textual) or
+duplicate the contract. Extracting it makes the keymap layer what it always wanted to be:
+frontend-neutral — the same payoff shape as `render.py` being textual-free.
+
+**What moved.** `trellis_tui/keymap.py` (422 lines, stdlib-only — `dataclasses`, `typing`,
+`importlib.metadata`) → `packages/trellis-keymap/src/trellis_keymap/__init__.py`, unchanged
+except the entry-point group, renamed `trellis_tui.keymaps` → **`trellis_keymap.keymaps`**
+(DECIDED with Matthew, S40): the discovery group belongs to the package that owns the contract,
+so any frontend reads a neutral group, not a `trellis_tui.*` one it doesn't own.
+
+**Consumers repointed.**
+- `trellis-tui-vim` now imports `trellis_keymap` and depends on `trellis-keymap` ALONE (was
+  `trellis-tui`). The vim language is now frontend-independent — it can drive a GUI unchanged.
+  Its entry point moved to the new group.
+- `trellis-tui` gained a `trellis-keymap` dependency; `trellis_tui/keymap.py` became a 19-line
+  compat shim (`from trellis_keymap import *`) so `app.py`/`grid.py` (`from . import keymap as
+  km`) stay byte-for-byte unchanged — minimal churn, write-protocol-safe. A later TUI pass can
+  repoint those two imports and drop the shim.
+
+**Verification.** trellis-keymap hermetic contract tests (19, lifted from the TUI suite) + vim
+hermetic (26) + vim Pilot integration (9) + the full TUI suite (196, through the shim) + core
+(821) all green. Discovery proved in an off-mount editable venv: `available_keymaps()` = `excel`
+(built-in) + `vim` (entry point) under the new group; `build_app(['--vim'])` wires the discovered
+`VimKeymap`.
+
+**The monorepo now ships four companion packages**: trellis-keymap (the contract), trellis-mathpack
+(engine plugin), trellis-undo (engine attachment), and trellis-tui (frontend) + trellis-tui-vim
+(a keymap on the contract). Three reference extension styles, plus the shared keymap contract the
+second frontend will build on.

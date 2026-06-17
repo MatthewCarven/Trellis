@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from trellis_tui.keymap import (
+from trellis_keymap import (
     BeginEdit,
     Chain,
     EnterMode,

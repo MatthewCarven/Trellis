@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trellis-keymap"
+version = "0.1.0"
+description = "The textual-free keymap contract for Trellis frontends — key languages as Actions."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matthew Carven", email = "matthewcarven@gmail.com" }]
+keywords = ["trellis", "spreadsheet", "keymap", "keybindings", "frontend"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+]
+# Zero dependencies — the contract is stdlib-only (dataclasses, typing,
+# importlib.metadata), exactly like the core engine. A FRONTEND (the TUI, a
+# future GUI) imports this to host key languages; a KEYMAP package
+# (trellis-tui-vim) imports only this to BE one. Neither needs the other's
+# framework. Keymaps register under the "trellis_keymap.keymaps" entry point.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trellis_keymap"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

@@ -1268,7 +1268,7 @@ def build_app(args: list[str]) -> TrellisApp | None:
 
     ``--keymap NAME`` selects the key language (Part 10): the built-in
     ``excel`` (default) or any keymap registered under the
-    ``trellis_tui.keymaps`` entry point. ``--vim`` is sugar for
+    ``trellis_keymap.keymaps`` entry point. ``--vim`` is sugar for
     ``--keymap vim``. An unknown name prints what IS available."""
     if "--version" in args:
         print(f"trellis-tui {__version__}")

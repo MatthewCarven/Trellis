@@ -48,6 +48,23 @@ Homepage = "https://github.com/matthewcarven/Trellis"
 [tool.hatch.build.targets.wheel]
 packages = ["src/trellis"]
 
+# Source distribution stays engine-only. Hatchling's sdist defaults to the
+# whole git file list, so we root-anchor an exclude to drop the monorepo's
+# companion packages (packages/ — mathpack, undo, and the TUI all ship as
+# their own distributions) and dev-internal files. What remains: src/trellis,
+# tests, README, LICENSE, pyproject — a `pip install` of this tarball builds
+# the engine and nothing else.
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/packages",
+    "/docs",
+    "/scripts",
+    "/design.md",
+    "/WORKLOG.md",
+    "/demo.csv",
+    "/demo2.csv",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"

@@ -3,6 +3,136 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+
+## 2026-06-17 — Session 40 (DPG spike, cont.): hybrid candidate + column-width fix
+
+Matthew ran variants A (formula bar) and B (in-place) and picked the combination: **edit in place,
+keep the formula bar up top as a status/formula line.** He also flagged the columns as too narrow.
+Built **variant C `dpg_grid_hybrid.py` — the candidate**: in-place editing + a top bar showing the
+cursor address, the cell's formula/value source, and `[READY]`/`[EDIT]` (live-mirrored from the cell
+while editing) + **fixed-width columns**. The narrow-column root cause was `mvTable_SizingFixedFit`
+with `width=-1` inputs (columns get no intrinsic width and collapse); fix = explicit
+`init_width_or_weight=92` per data column + `scrollX/scrollY` — verified 92px headlessly. Also fixed
+the window-title mojibake (a `·` rendered as `Â·` on Windows -> plain ASCII " - ") in all three.
+
+Reuses `grid_model.py` + the key adapter unchanged (third view over the same model). **Spike suite:
+37 headless tests green** (15 model + 9 dpg + 7 in-place + 6 hybrid). Still additive under
+`spikes/dpg-grid/`. NEXT: a real-GUI prototype around variant C (selection highlight, undo via
+trellis-undo, mouse drag-select, persistent column resize) when Matthew's ready to start the new
+project proper.
+
+---
+
+## 2026-06-17 — Session 40 (DPG spike, cont.): in-place editing variant + a real bug
+
+Matthew ran the formula-bar spike and hit `ModuleNotFoundError: trellis_keymap` (his venv predates
+the extraction). Fix: the spike now self-bootstraps `sys.path` (in-repo `src` + `packages/
+trellis-keymap/src`), so it runs from a checkout with only `pip install dearpygui` — plus a
+`conftest.py` for pytest. That run also exposed a genuine bug `load_model` had: `Workbook.sheets`
+is a METHOD, not a property — now `wb[next(iter(wb))]` (covered by two new tests).
+
+Then built **variant B, in-place editing** (`dpg_grid_inplace.py`) alongside variant A (formula
+bar): the cursor cell IS the editor, modal like Excel — READY (arrows nav via ExcelKeymap) vs EDIT
+(F2/type begins; the cell's input owns the keyboard; Enter commits+down, Tab commits+right, Esc
+cancels; global handler gated on an `editing` flag). Reuses `grid_model.py` and the key adapter
+unchanged — same engine, same keymap, two feels. README now compares them and lists the frictions
+variant B surfaces (modal arrows, type-to-replace timing, click-gives-a-caret) for Matthew to judge
+live. **Spike suite: 31 headless tests green** (15 model + 9 dpg + 7 in-place). Still additive,
+its own dir; nothing to commit beyond `spikes/dpg-grid/`.
+
+---
+
+## 2026-06-17 — Session 40 (later still): DearPyGui spike — proving the new-GUI seam
+
+**Context:** Matthew is scoping a new project with a new GUI (likes DearPyGui, happy owning the
+input/render layer). Built a spike to pressure-test DPG ergonomics AND to validate that the S40
+packaging + trellis-keymap extraction actually pay off for a second frontend.
+
+**What landed** (`spikes/dpg-grid/`, a throwaway/seed — NOT a package): `grid_model.py`, an
+engine-neutral view-model (windowing = used_range ∪ a 12×6 minimum with tracked UL/LR bounds for
+O(1) visibility — his plan; commit policy identical to the TUI's; `apply_action` executes keymap
+Actions) with ZERO DearPyGui. `dpg_grid.py`, a ~250-line DPG shell: a windowed grid of read-only
+value cells (his "text-boxes for the active view"), a formula bar editing the cursor cell, and a
+`keypress_from_code` adapter — the only DPG-specific code in the key path — so the SAME
+`ExcelKeymap` the TUI uses drives the GUI. demo.csv (live formulas) + README.
+
+**Verification: 22 headless tests green** (15 model + 7 DPG). DPG segfaults trying to open a
+viewport in this sandbox, but imports + builds its item tree + get/set work headlessly, so the
+construction code and callbacks ARE exercised: recalc propagation shows up in the grid, keymap
+arrows move the cursor + follow the formula bar, type-to-edit seeds the bar, the window grows to
+cover far cells. What's left for Matthew's machine: live key dispatch, rendering, the cursor-
+highlight theme, modifier polling (ctrl-combos tested via the model, not through DPG).
+
+**Payoff proven:** a frontend = `import trellis` + `import trellis_keymap` + draw-the-window/adapt-
+the-keys, no Textual. NEXT experiment if he likes it: in-place cell editing (the cursor cell as an
+editable input_text) — where DPG's real editing ergonomics live. The spike depends only on the
+published trellis + trellis-keymap, so it `git mv`s out to the new project's repo cleanly. Pending:
+Matthew commits the S40 work (this spike is additive, its own dir).
+
+---
+
+## 2026-06-17 — Session 40 (later): trellis-keymap — the keymap contract gets its own package
+
+**Context:** same session, after the atomic-save work and packaging the engine. Matthew is
+planning a new GUI for the next project (likes DearPyGui, happy owning the input layer) and asked
+to extract `trellis-keymap` so a second frontend can share the Excel/vim key languages. He picked
+the entry-point group rename (`trellis_tui.keymaps` -> `trellis_keymap.keymaps`).
+
+**What landed.** New `packages/trellis-keymap/` — the 422-line, stdlib-only keymap contract
+(`KeyPress`/`KeyContext`/`Action`/`Keymap`/`ExcelKeymap` + discovery) lifted out of `trellis-tui`
+verbatim, zero dependencies like the core, group renamed to `trellis_keymap.keymaps`, with a
+README and 19 hermetic contract tests. `trellis-tui-vim` repointed to import `trellis_keymap` and
+now depends on `trellis-keymap` ALONE (dropped `trellis-tui`) — the vim language is frontend-
+independent now; its entry point moved to the new group. `trellis-tui` gained the `trellis-keymap`
+dep and `trellis_tui/keymap.py` became a 19-line compat shim (`from trellis_keymap import *`), so
+`app.py`/`grid.py` are byte-for-byte unchanged (only one stale group-name docstring in app.py was
+refreshed). One TUI test repointed its monkeypatch to `trellis_keymap.entry_points` (discovery
+moved there).
+
+**Verification — all green.** trellis-keymap hermetic 19 / vim hermetic 26 / vim Pilot 9 / full
+TUI suite 196 (through the shim, run in halves) / core 821. Off-mount editable venv proved
+discovery under the new group: `available_keymaps()` = excel + vim; `build_app(['--vim'])` wires
+the discovered VimKeymap. The shim re-exports the full surface and `Keymap` is the same object
+(isinstance holds).
+
+**Forward note.** This sets up the new GUI cleanly: it imports `trellis` (engine) + `trellis-keymap`
+(input contract) and owns its own rendering — no Textual, no TUI. The TUI session can later repoint
+app.py/grid.py off the shim and delete it. Pending Matthew's side: commit + push the S40 work
+(CSV atomic + packaging sdist target + the trellis-keymap extraction).
+
+---
+
+## 2026-06-17 — Session 40: Part 11 row 1 — write_csv is atomic now
+
+**Context:** pickup after Part 10 closed (S39, field-verified). Confirmed with Matthew the repo is
+fully pushed (his `git status` = up to date with origin/main; my sandbox's view of origin was
+stale — corrected, no push was pending). Cleaned a field-check leftover: `.gitignore` now ignores
+`demo[0-9]*.csv` (catches demo2.csv etc.; the already-tracked demo.csv stays tracked). Next
+milestone chosen: **CSV-path I/O polish**; Matthew picked **atomic save** to lead.
+
+**What landed.** `write_csv` no longer opens the destination directly. It streams into a temp file
+beside the target and `os.replace`s it into place — atomic on POSIX and Windows, so an interrupted
+save can't truncate the user's original (the write-protocol failure mode, now closed for the
+engine's own file path too). On any failure the temp is unlinked and the error re-raised. The
+empty-sheet branch shares the path. `_apply_target_mode` restores the mode `open(path, "w")` would
+have produced (copy existing on overwrite, else `0o666 & ~umask`) so mkstemp's 0600 doesn't leak
+through; best-effort, POSIX-shaped. Docstrings (module + `path` param) note the guarantee.
+
+**Tests: +5, core 816 -> 821, all green** (full `--doctest-modules src tests` in ~1s). No temp
+litter after success; a monkeypatched mid-serialize failure leaves the original intact + no litter
++ propagates; empty-sheet stays atomic; a short overwrite truncates a longer file's stale tail;
+(POSIX-only) 0640 preserved across overwrite. Pure durability — no API or happy-path change.
+
+**Protocol notes.** Edited off-mount (python string-patch -> /tmp -> cp -> sha256-verified, per
+[[write-protocol-mount-folders]]); PYTHONPYCACHEPREFIX=/tmp/pyc throughout; pytest needed
+`pip install --break-system-packages` in this fresh sandbox.
+
+**NEXT (Part 11):** row 2 = read robustness (UTF-8 BOM + semicolon-delimiter sniff so real Excel
+exports open clean — benefits the TUI for free); row 3 = graceful open errors in the CLI path
+(`app.py:1302` read_csv is unguarded — a bad-encoding file currently bubbles a traceback). Pending
+Matthew's side: commit + push this session (csv.py, test_io_csv.py, .gitignore, design.md, WORKLOG).
+
+---
 ## 2026-06-12 — Session 39: PART 10 ROW 4 — contract doc + FIELD CHECK PASSED; PART 10 COMPLETE
 
 **Context:** pickup session. Matthew ran the field check live mid-session.

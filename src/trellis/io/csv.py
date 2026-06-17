@@ -17,7 +17,9 @@ CSV export); with ``formulas=True``, formula cells emit their source
 text (``cell.formula``, leading ``=`` included) instead. The bounding
 rectangle is determined by the maximum populated row and column;
 trailing empty cells inside that rectangle are emitted as empty fields,
-since CSV is rectangular.
+since CSV is rectangular. Writes are atomic: content is streamed to a
+temporary file in the destination directory and then atomically replaced
+into place, so an interrupted write never truncates an existing file.
 
 Round-trip behaviour: a workbook with one sheet that contains only
 strings, ints, floats, and ``None`` (= empty) round-trips losslessly.
@@ -34,6 +36,9 @@ from __future__ import annotations
 
 import csv as _csv
 import math
+import os
+import stat
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
@@ -203,7 +208,10 @@ def write_csv(
     sheet
         The sheet to write.
     path
-        Destination path. Overwrites if it exists.
+        Destination path. Overwrites if it exists. The write is atomic:
+        content goes to a temp file in the same directory and is then
+        ``os.replace``-d into place, so an interrupted save never truncates
+        an existing file.
     encoding
         File encoding. Defaults to UTF-8.
     dialect
@@ -217,34 +225,73 @@ def write_csv(
         a values-only CSV is what other tools expect from an export.
     """
     bounds = sheet.used_range()
-    if bounds is None:
-        # No non-empty cells -> empty file. Could alternatively raise,
-        # but "no content" is a legitimate state. (A cell explicitly set
-        # to None is empty and does not extend the rectangle.)
-        Path(path).write_text("", encoding=encoding)
-        return
+    target = Path(path)
 
-    cells = sheet._cells
-    (_min_row, _min_col), (max_row, max_col) = bounds
+    # Atomic write: stream into a temp file in the *same directory* as the
+    # target, then os.replace it into place. os.replace is atomic on both
+    # POSIX and Windows, so a save interrupted partway (disk full, crash, a
+    # flaky mount) leaves the user's original file untouched rather than
+    # truncated. The temp lives beside the target so the replace is a
+    # same-filesystem rename, never a cross-device copy. On any failure the
+    # temp is removed -- no half-written ``.tmp`` litter beside the original.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.name}.", suffix=".tmp"
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding, newline="") as f:
+            if bounds is not None:
+                # An empty sheet writes an empty file (a legit state); a cell
+                # explicitly set to None does not extend the rectangle.
+                cells = sheet._cells
+                (_min_row, _min_col), (max_row, max_col) = bounds
+                writer = _csv.writer(f, dialect=dialect)
+                for r in range(max_row + 1):
+                    row: list = []
+                    for c in range(max_col + 1):
+                        cell = cells.get((r, c))
+                        if cell is None:
+                            row.append("")
+                        elif formulas and cell.formula is not None:
+                            # Source text wins -- checked before the value so a
+                            # formula whose current value is None (or an error)
+                            # still round-trips its text.
+                            row.append(cell.formula)
+                        elif cell.value is None:
+                            row.append("")
+                        else:
+                            row.append(_stringify(cell.value))
+                    writer.writerow(row)
+        _apply_target_mode(tmp, target)
+        os.replace(tmp, target)
+    except BaseException:
+        # Never leave a half-written temp beside the user's intact original.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
-    with Path(path).open("w", encoding=encoding, newline="") as f:
-        writer = _csv.writer(f, dialect=dialect)
-        for r in range(max_row + 1):
-            row: list = []
-            for c in range(max_col + 1):
-                cell = cells.get((r, c))
-                if cell is None:
-                    row.append("")
-                elif formulas and cell.formula is not None:
-                    # Source text wins — checked before the value so a
-                    # formula whose current value is None (or an error)
-                    # still round-trips its text.
-                    row.append(cell.formula)
-                elif cell.value is None:
-                    row.append("")
-                else:
-                    row.append(_stringify(cell.value))
-            writer.writerow(row)
+
+def _apply_target_mode(tmp: Path, target: Path) -> None:
+    """Give ``tmp`` the mode ``open(target, "w")`` would have produced.
+
+    ``mkstemp`` creates its file 0600, which would otherwise leak through the
+    ``os.replace``. On overwrite, copy the existing target's permission bits;
+    for a brand-new file, apply the process umask to the 0o666 default.
+    POSIX-shaped and effectively a no-op on Windows. Best-effort: any OSError
+    is swallowed, because a permission quirk must never defeat a good save.
+    """
+    try:
+        if target.exists():
+            mode = stat.S_IMODE(os.stat(target).st_mode)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(tmp, mode)
+    except OSError:
+        pass
 
 
 def _stringify(v) -> str:
