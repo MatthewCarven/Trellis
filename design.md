@@ -1457,9 +1457,11 @@ Conversion happens at one seam, exactly like `to_a1`/`parse`: the parser stays p
 | 3 | **DONE (S41, uncommitted)** — `TokenKind.BANG`+`QUOTED_NAME` (`!`; `'..'` with `''` escape) + parser sheet-qualifier (`_parse_ident` checks `!` first; factored `_parse_cell_or_range`/`_parse_quoted_sheet`) + `CellRef.sheet`. Parse-only — resolves to holding sheet until row 4. Core 825→843 | `formula/lexer.py`, `parser.py`, `ast.py` + tests |
 | 4 | **DONE (S41, uncommitted)** — `extract_deps(ast, sheet_id, resolve)` (unknown sheet → no dep); engine `_resolve_sheet_id`; `Context.workbook` + evaluator `_resolve_sheet` cross-sheet read; unknown sheet → `NAME`. (Removed-sheet→`REF` re-eval moved to row 5.) Core 843→855 | `formula/recalc.py`, `evaluator.py` + tests |
 | 5 | **DONE (S41, uncommitted)** — `sheet:rename` rewrites referrers' text **and** AST in place (`rename_sheet_in_formula` token-splice in `shift.py`; quiet/value-preserving) so cross-sheet refs survive a target rename; `sheet:remove` re-registers referrers → broken ref → `NAME` (cascades). Core 855→870 | `formula/recalc.py`, `shift.py` + tests |
-| 6 | Docs: README "Extending"/syntax, TUI README cross-sheet note, design rows, worklog | docs |
+| 6 | **DONE (S41, uncommitted)** — cross-sheet syntax note in README (library quick taste) + TUI README (sheet-tabs bullet updated, dropped from "not yet"); design rows + worklog. **Part 12 COMPLETE** | docs |
 
 Row 2 is deliberately first and self-contained: it closes the live rename bug and proves the id model with a test *before* any new syntax exists.
+
+**Status — Part 12 COMPLETE (S41).** All six rows landed; the core suite grew 821 → 870 across the part. `Sheet2!A1` / `'My Data'!A1` references resolve, recalc across sheets, survive a target rename (text + AST rewritten), and degrade to `#NAME?` on a missing/removed sheet — all on the stable `sheet_id` graph, which also retired the latent intra-sheet rename-desync bug found in row 2. One follow-up stays flagged: `shift_formula` is `!`-unaware, so clipboard/fill of a formula containing a cross-sheet ref isn't handled yet (its own task when cross-sheet meets the clipboard).
 
 ## References
 

@@ -4,6 +4,28 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-20 — Session 41 (build, cont.): Part 12 row 6 — docs; PART 12 COMPLETE
+
+Row 6, the docs closeout. Main README: a cross-sheet paragraph in the library quick taste (`=Costs!A1`,
+`=SUM(Data!A1:A3)`, `='My Sheet'!B2`; recompute across sheets, rewrite on rename, `#NAME?` if missing).
+TUI README: the sheet-tabs bullet now affirms cross-sheet refs span tabs (was "don't exist yet"), and
+cross-sheet is dropped from the "deliberately not here yet" list. design.md: row 6 marked DONE + a
+**Part 12 COMPLETE** status note under the implementation table.
+
+**PART 12 COMPLETE.** Six rows: (1) design, (2) `Sheet.id` + recalc keyed by id (fixed the latent
+intra-sheet rename-desync), (3) lexer/parser/AST syntax, (4) name→id resolution + cross-sheet eval,
+(5) rename rewrite + remove re-eval, (6) docs. **Core suite 821 → 870** across the part. `Sheet2!A1` /
+`'My Data'!A1` references now resolve, recalc across sheets, survive a target rename (text + AST
+rewritten), and degrade to `#NAME?` on a missing/removed sheet — all on the stable `sheet_id` graph.
+
+**One flagged follow-up (its own future task, not a Part 12 row):** `shift_formula` is `!`-unaware, so
+copy/paste/fill of a formula containing a cross-sheet ref isn't handled yet — the clipboard×cross-sheet
+seam; revisit when it matters. **Uncommitted** (row 6) — files: `README.md`, `packages/trellis-tui/
+README.md`, `design.md`, `WORKLOG.md`. Other open thread: Part 11 (CSV-path I/O polish) rows 2-3.
+
+---
+
+
 ## 2026-06-20 — Session 41 (build, cont.): Part 12 row 5 — rename rewrite + remove re-eval
 
 Built **Part 12 row 5**, closing the cross-sheet lifecycle. `shift.py`: new `rename_sheet_in_formula(

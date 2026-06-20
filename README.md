@@ -37,6 +37,8 @@ print(sh["B2"].value)   # 'big'
 
 22 built-in functions ship with the engine — aggregates (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`), scalar math (`ABS`, `ROUND`, `INT`), logical (`IF`, `IFERROR`, `ISERROR`, `AND`, `OR`, `NOT`), type checks (`ISBLANK`, `ISNUMBER`, `ISTEXT`), and text (`CONCAT`, `LEN`, `LEFT`, `RIGHT`, `MID`). Anything else is a plugin — see [docs/plugin-example.md](docs/plugin-example.md).
 
+Formulas can reach across sheets in the workbook — `=Costs!A1`, `=SUM(Data!A1:A3)`, or `='My Sheet'!B2` when the name needs quoting. Cross-sheet references recompute across sheets, are rewritten automatically when a referenced sheet is renamed, and degrade to `#NAME?` if the sheet is missing.
+
 ## Quick taste (terminal app)
 
 ```
