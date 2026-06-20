@@ -3,6 +3,35 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+## 2026-06-20 — Session 41 (design): cross-sheet refs design pass + a latent rename bug
+
+Matthew opened the "how do sheet references name things?" question and we settled it in design only
+(no code touched). Two decisions locked, now Part 12's "Decisions confirmed up front":
+**(1) workbook-local only** — ship `=Sheet2!A1` resolving within the in-memory session; cross-*file*
+`[Book]Sheet!A1` stays out and we don't even reserve `[` (illegal today → non-breaking to add later).
+**(2) Stable `sheet_id`, name display-only** — the recalc graph + AST resolution key on a per-sheet
+id; the name is the public string form (formula text + CSV), mirroring the A1↔(row,col) boundary.
+Rename becomes a display/serialization concern, never a correctness one.
+
+Reading the engine to ground the decision surfaced a **latent bug**: `RecalcEngine` never subscribes
+to `sheet:rename` (recalc.py:157-162) yet keys the whole graph off the live `sheet.name`
+(recalc.py:223, :265). So renaming a sheet silently desyncs recalc *even with no cross-sheet refs*:
+a formula registered before the rename stops recomputing when its precedent is edited after, until
+it's re-typed — and stale `(old, …)` keys leak across `_asts`/`_dependents`/`_dependencies`/
+`_sheet_subs`. The existing rename test only asserts the status line, so it never caught this. The
+`sheet_id` migration (decision 2) retires the whole bug class by construction — no band-aid rekey.
+
+Wrote **design.md Part 12** (~80 lines, 1387→1467): boundary model; full pipeline (lexer `!` +
+quoted `'My Data'` names → parser sheet-qualifier in `_parse_ident` → `CellRef.sheet: str|None` →
+`extract_deps` name→id → `Context.workbook` eval); error model (`NAME` unknown sheet / `REF` removed
+sheet — both constants already exist); rename text-rewrite sweep + remove→`REF` re-eval; rejected/
+deferred (cross-file, `[` reservation, uuid ids, id-in-AST, Excel's destructive `#REF!`); open
+questions; and a 6-row staged breakdown where **row 2 lands first** — `Sheet.id` + a standalone
+*failing* rename-desync test, then the id migration that makes it pass, before any new syntax exists.
+Syntax confirmed **Excel-faithful trailing `Sheet1!A1`** (a leading-`!` sigil weighed and rejected — two symbols vs one, `.`-vs-decimal collision, no Excel paste-compat). NEXT (Matthew's call): start building row 2, or land the rename-bug fix standalone first.
+
+---
+
 
 ## 2026-06-17 — Session 40 (DPG spike, cont.): hybrid candidate + column-width fix
 

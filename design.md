@@ -1385,3 +1385,85 @@ hermetic (26) + vim Pilot integration (9) + the full TUI suite (196, through the
 (engine plugin), trellis-undo (engine attachment), and trellis-tui (frontend) + trellis-tui-vim
 (a keymap on the contract). Three reference extension styles, plus the shared keymap contract the
 second frontend will build on.
+
+# Part 12: Cross-sheet references (workbook-local) — names out front, ids underneath
+
+## Purpose
+
+`=Sheet2!A1`. The feature Part 9 decision 3 deferred ("wants its own design pass") — this is that pass. Scope is **workbook-local**: a reference names another *sheet* (tab) in the current in-memory `Workbook`/session. Cross-*file* `[costs.csv]Sheet1!A1` stays out (decision 1) — under sheet-=-file it's a different, bigger feature with its own identity and resolution story.
+
+This is the first deep reach into the engine's formula core since Part 6's `$`/`shift_formula` — most parts since have been TUI-side. It earns it: the recalc graph was made workbook-level from day one *for exactly this* (Part 2: "make it workbook-level from the start"), and the key was deliberately `(sheet_name, row, col)` to "keep the algorithms identical when we add cross-sheet support" (recalc.py architecture note). That note is half-right — the graph spans sheets already, but keying on the *mutable name* is a latent bug (below). This part finishes the job and fixes the key.
+
+## The bug this also closes (found S41, 2026-06-20)
+
+Renaming a sheet silently desyncs recalc *today*, with no cross-sheet refs in play. `RecalcEngine` subscribes to `sheet:add`/`sheet:remove` but **not `sheet:rename`** (recalc.py:157-162), and every graph key is built from the live `sheet.name` (recalc.py:223, :265). So `B1=A1` registered as `(old, B1) → {(old, A1)}` keeps those keys after a rename, but a post-rename edit to A1 fires keyed `(new, A1)` — whose `_dependents` set is empty → **B1 never recomputes** until it's re-typed. Stale `(old, …)` entries also leak across `_asts`/`_dependents`/`_dependencies`/`_sheet_subs`. The existing rename test only asserts the status line, so it never caught this. Keying on a stable id (decision 2) retires the whole bug class — no `sheet:rename` graph-rekey band-aid needed.
+
+## Decisions confirmed up front (Matthew, 2026-06-20)
+
+1. **Workbook-local only.** Ship `=Sheet2!A1`, resolving within the current session's sheets. `[Book]Sheet!A1` cross-file refs are out, and we do **not** pre-reserve `[` in the grammar — it's an illegal character today, so adding it later is non-breaking (YAGNI; minimalist core).
+2. **Stable `sheet_id`, name display-only.** The dependency graph keys on a stable per-sheet id; the name is the public *string form* only. Same boundary discipline as A1↔`(row,col)`: the name lives in formula text and CSV, the id lives in the graph and resolution. Rename becomes a display/serialization concern, never a correctness one.
+3. **Excel-faithful syntax `Sheet1!A1`.** The trailing `!` separates sheet from cell — `=Sheet1!A1`, `=SUM(Sheet1!A1:A10)`, `='Q1 Budget'!A1`. One symbol both announces and separates, the learning curve is zero, and a paste from Excel/Sheets/LibreOffice just works. A leading-`!` sigil was weighed and rejected (see below).
+
+## The boundary model (the spine)
+
+Mirror the address convention. A sheet has two faces:
+
+- **Name** — the public string form. Appears in formula text (`=Sheet2!A1`) and saved CSVs. Mutable, workbook-unique (already enforced: `add_sheet`/`add`/`rename_sheet` all raise on collision).
+- **`sheet_id`** — internal identity. A monotonic int assigned in `Sheet.__init__` from a module counter, so identity exists before a sheet joins a workbook (REPL-first). **Session-only — never serialized** (CSV is nameful text; on load, names re-resolve to fresh ids).
+
+Conversion happens at one seam, exactly like `to_a1`/`parse`: the parser stays pure and name-based; the recalc engine resolves name→id once it has the workbook.
+
+## Pipeline
+
+- **Lexer** (`formula/lexer.py`) — add a `!` token (new `TokenKind.BANG`) and quoted sheet-names `'My Data'` (`''` escapes a literal quote, Excel-style). Bare names still arrive as `IDENT`.
+- **Parser** (`formula/parser.py`) — in `_parse_ident`, an `IDENT` (or quoted-name) **followed by `!`** is a sheet qualifier: consume the `!`, parse the trailing cell/range, attach the sheet name. For a range the sheet binds the whole `Sheet2!A1:B5` (the end corner inherits it; a sheet on the right-hand corner is a parse error).
+- **AST** (`formula/ast.py`) — `CellRef` gains `sheet: str | None = None` (name as written; `None` = the holding sheet). The trailing default keeps every existing positional `CellRef(row, col, …)` construction valid. `RangeRef` carries the sheet on its corners (`start.sheet == end.sheet` by construction).
+- **Resolution + graph** (`formula/recalc.py`) — `extract_deps(ast, holding_sheet, workbook)` maps each ref's sheet name → `sheet_id` (`None` → the holding sheet's id), emitting `CellKey = (sheet_id, row, col)`. `CellKey`'s first element becomes the id throughout; `_on_cell_change`/`_on_sheet_remove`/`_subscribe_sheet` key on `sheet.id` (or the sheet object) instead of `sheet.name`. The engine already subscribes to every sheet's `cell:change`, so cross-sheet propagation works the moment the keys line up.
+- **Evaluator** (`formula/evaluator.py`) — `Context` gains `workbook: Workbook | None`. `_eval_cellref`/`_eval_rangeref` resolve `node.sheet` (name) via the workbook when set, else use `ctx.sheet`. A missing sheet → `REF`.
+
+## Error model (constants already exist)
+
+- Unknown sheet name at resolve/eval → `NAME` (an unknown identifier).
+- Reference into a sheet removed while referenced → `REF`, **non-destructively**: the formula text keeps `Sheet2!A1` and recovers if a sheet of that name returns. (Excel's destructive rewrite to `#REF!` is rejected — see below.)
+
+## Rename & remove
+
+- **Rename** — the graph is id-keyed, so it's untouched; the only job is keeping *text* honest so saved CSVs reload. The engine subscribes to `sheet:rename` and rewrites the formula text of the bounded set of cells whose AST references the renamed `sheet_id` (it already holds that reverse set in `_dependents`), re-rendering `OldName!…` → `NewName!…`. No graph rekey — that's the whole point of the id.
+- **Remove** — `sheet:remove` re-evaluates the removed sheet's cross-sheet dependents so they surface `REF` (today they'd silently read `None`/`0`).
+
+## Rejected / deferred
+
+- **Cross-file `[Book]Sheet!A1`** — per decision 1; wants its own identity + multi-file resolution + load-order story.
+- **Leading-`!` sigil (`!Sheet1.A1` / `!Sheet1!A1`)** — weighed (Matthew, 2026-06-20): a leading sigil makes cross-sheet refs scannable like `$`/`#` and tells the parser "sheet ref incoming" up front. Rejected: it still needs a *second* separator before the cell — two symbols where Excel's trailing `!` does both jobs — a `.` separator collides visually with decimals, and nothing copied from Excel/Sheets would parse. Excel-faithful wins on familiarity + paste-compat (decision 3).
+- **Reserving `[` in the grammar now** — per decision 1; non-breaking to add later.
+- **uuid sheet ids** — heavier than needed; ids are session-scoped, a monotonic int suffices and reads better in debug output.
+- **Storing the resolved id in the AST (render the name on demand)** — would make rename truly zero-work, but forces parse-time resolution (a workbook-aware parser) and can't represent a ref to an absent sheet. Keeping the *name* in the AST holds the pure-parser convention and the name=string-form analogy; the rename text-sweep is the modest, local cost. Revisit only if the sweep proves annoying.
+- **Excel's destructive `#REF!` rewrite on sheet delete** — we keep refs non-destructive (the name survives, recovers if the sheet returns); simpler and less surprising for a file-backed editor.
+- **Re-resolve-on-`sheet:add` for late-loaded names** — for workbook-local + CLI-load-all, siblings exist at registration; an unresolved name recovers on cell re-entry. Auto re-resolve when a matching sheet appears is a cheap later add if the field misses it.
+
+## Open questions
+
+- **`sheet_id` home** — module counter in `core/sheet.py` (leaning) vs. workbook-assigned on add. Counter wins for REPL identity-before-attachment; confirm at build.
+- **Rename text-rewrite write path** — re-render through the normal formula-set (re-registers deps; may emit `cell:change`) vs. a quiet text-only update. Lean quiet — a rename isn't a value change.
+- **`Context.workbook` vs. a resolver callback** — passing the whole `Workbook` is simplest and the evaluator only needs name→sheet lookup; a narrow `resolve_sheet(name)` callable is the tighter seam if we want to keep the evaluator workbook-agnostic.
+- **Supersession of Part 2** — the recalc section's `(sheet_name, …)` key description is superseded here; Part 2 stays as written (historical), this part is the authority.
+
+## Implementation breakdown (staged; each lands green before the next)
+
+| # | What lands | Where |
+|---|------------|-------|
+| 1 | This design pass | design.md Part 12 |
+| 2 | `Sheet.id` (module counter) + a standalone rename-desync **failing test**, then the `sheet_id` graph migration that makes it pass (no new syntax yet) | `core/sheet.py`, `formula/recalc.py` + tests |
+| 3 | Lexer `!`/quoted-name + parser sheet-qualified cell/range + `CellRef.sheet` | `formula/lexer.py`, `parser.py`, `ast.py` + tests |
+| 4 | `extract_deps` name→id resolution; `Context.workbook`; cross-sheet eval; unknown→`NAME`/`REF` | `formula/recalc.py`, `evaluator.py` + tests |
+| 5 | `sheet:rename` text-rewrite sweep; `sheet:remove`→`REF` re-eval | `formula/recalc.py` + tests |
+| 6 | Docs: README "Extending"/syntax, TUI README cross-sheet note, design rows, worklog | docs |
+
+Row 2 is deliberately first and self-contained: it closes the live rename bug and proves the id model with a test *before* any new syntax exists.
+
+## References
+
+- `core/workbook.py` — `rename_sheet`/`add_sheet` uniqueness; the `sheet:rename` payload (`old`, `new`, `sheet`).
+- `formula/recalc.py` — `CellKey`, `extract_deps`, the `sheet:add`/`remove` subscriptions the rename handler joins.
+- `formula/evaluator.py` `Context` — gains the workbook handle.
+- design.md Part 2 (recalc, superseded key) · Part 9 decision 3 (the deferral this pass discharges).
