@@ -1455,7 +1455,7 @@ Conversion happens at one seam, exactly like `to_a1`/`parse`: the parser stays p
 | 1 | This design pass | design.md Part 12 |
 | 2 | **DONE (S41, uncommitted)** — `Sheet.id` (module counter; stable + rename-invariant) + a standalone rename-desync test (verified red on the old name-keyed graph, green after) + the `sheet_id` graph migration. Engine gained a `{sheet_id: sheet}` map for write-back (`Workbook` is name-keyed). Core 821→825 | `core/sheet.py`, `formula/recalc.py` + tests |
 | 3 | **DONE (S41, uncommitted)** — `TokenKind.BANG`+`QUOTED_NAME` (`!`; `'..'` with `''` escape) + parser sheet-qualifier (`_parse_ident` checks `!` first; factored `_parse_cell_or_range`/`_parse_quoted_sheet`) + `CellRef.sheet`. Parse-only — resolves to holding sheet until row 4. Core 825→843 | `formula/lexer.py`, `parser.py`, `ast.py` + tests |
-| 4 | `extract_deps` name→id resolution; `Context.workbook`; cross-sheet eval; unknown→`NAME`/`REF` | `formula/recalc.py`, `evaluator.py` + tests |
+| 4 | **DONE (S41, uncommitted)** — `extract_deps(ast, sheet_id, resolve)` (unknown sheet → no dep); engine `_resolve_sheet_id`; `Context.workbook` + evaluator `_resolve_sheet` cross-sheet read; unknown sheet → `NAME`. (Removed-sheet→`REF` re-eval moved to row 5.) Core 843→855 | `formula/recalc.py`, `evaluator.py` + tests |
 | 5 | `sheet:rename` text-rewrite sweep; `sheet:remove`→`REF` re-eval | `formula/recalc.py` + tests |
 | 6 | Docs: README "Extending"/syntax, TUI README cross-sheet note, design rows, worklog | docs |
 

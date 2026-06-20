@@ -73,26 +73,42 @@ CellKey = tuple[int, int, int]
 # --- Dependency extraction ---------------------------------------------
 
 
-def extract_deps(ast: Any, sheet_id: int) -> set[CellKey]:
+def extract_deps(ast: Any, sheet_id: int, resolve: Any = None) -> set[CellKey]:
     """Return the set of cell keys this AST references.
 
     ``RangeRef`` nodes expand to the full rectangle of positions. ``CellRef``
     contributes one position. Literals (Number, String, Bool) contribute
     nothing. UnaryOp/BinaryOp/FunctionCall recurse into operands/args.
 
-    The holding sheet's id is supplied by the caller; cross-sheet refs are
-    out for v1 so a CellRef has no sheet of its own — it always belongs to
-    the holding sheet.
+    ``sheet_id`` is the holding sheet's id (for refs with no sheet qualifier).
+    ``resolve`` maps a sheet *name* to a sheet_id, or ``None`` if no such sheet
+    exists — this is how cross-sheet refs (``Sheet2!A1``) find their owner. A
+    qualified ref to an unknown sheet contributes no dependency (the formula
+    evaluates to ``NAME`` and recovers if re-entered). With ``resolve=None``,
+    qualified refs fall back to the holding sheet.
     """
     deps: set[CellKey] = set()
 
+    def _owner(sheet_name: Any) -> int | None:
+        # Unqualified ref (None) or no resolver -> the holding sheet. A
+        # qualified name resolves via the caller's map; an unknown sheet
+        # returns None and the ref is dropped (formula -> NAME, recovers on
+        # re-entry; design.md Part 12).
+        if sheet_name is None or resolve is None:
+            return sheet_id
+        return resolve(sheet_name)
+
     def walk(node: Any) -> None:
         if isinstance(node, CellRef):
-            deps.add((sheet_id, node.row, node.col))
+            oid = _owner(node.sheet)
+            if oid is not None:
+                deps.add((oid, node.row, node.col))
         elif isinstance(node, RangeRef):
-            for r in range(node.start.row, node.end.row + 1):
-                for c in range(node.start.col, node.end.col + 1):
-                    deps.add((sheet_id, r, c))
+            oid = _owner(node.start.sheet)
+            if oid is not None:
+                for r in range(node.start.row, node.end.row + 1):
+                    for c in range(node.start.col, node.end.col + 1):
+                        deps.add((oid, r, c))
         elif isinstance(node, UnaryOp):
             walk(node.operand)
         elif isinstance(node, BinaryOp):
@@ -267,7 +283,7 @@ class RecalcEngine:
                 self._propagate(key, trigger)
                 return
 
-            deps = extract_deps(ast, sheet.id)
+            deps = extract_deps(ast, sheet.id, self._resolve_sheet_id)
 
             if self._would_cycle(key, deps):
                 sheet._set_value((key[1], key[2]), CIRC, trigger=trigger)
@@ -377,7 +393,7 @@ class RecalcEngine:
         sheet = self._sheets_by_id.get(key[0])
         if sheet is None:
             return
-        ctx = Context(sheet=sheet, current_cell=(key[1], key[2]))
+        ctx = Context(sheet=sheet, current_cell=(key[1], key[2]), workbook=self._workbook)
         result = evaluate(ast, ctx)
         sheet._set_value((key[1], key[2]), result, trigger=trigger)
 
@@ -392,6 +408,14 @@ class RecalcEngine:
         sheet._set_value((key[1], key[2]), value, trigger=trigger)
 
     # --- helpers --------------------------------------------------------
+
+    def _resolve_sheet_id(self, name: str) -> int | None:
+        # Map a sheet NAME to its id (or None if no such sheet) — the
+        # cross-sheet resolver handed to extract_deps. Workbook is name-keyed.
+        wb = self._workbook
+        if wb is None or name not in wb:
+            return None
+        return wb[name].id
 
     @staticmethod
     def _key(sheet_id: int, addr: str | tuple[int, int]) -> CellKey:

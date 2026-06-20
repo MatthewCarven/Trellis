@@ -436,3 +436,30 @@ def test_evaluate_never_raises_formulaerror():
         sheet["A2"] = 2
         result = evaluate(parse_formula(expr), ctx(sheet))
         assert isinstance(result, FormulaError)
+
+
+# --- Cross-sheet resolution (Part 12 row 4) --------------------------------
+
+
+def test_cross_sheet_ref_resolves_via_workbook():
+    from trellis import Workbook
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s2 = wb.add_sheet("Sheet2")
+    s2["A1"] = 99
+    c = Context(sheet=s1, workbook=wb)
+    assert evaluate(parse_formula("=Sheet2!A1"), c) == 99
+
+
+def test_qualified_ref_unknown_sheet_is_name():
+    from trellis import Workbook
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    c = Context(sheet=s1, workbook=wb)
+    assert evaluate(parse_formula("=Ghost!A1"), c) == NAME
+
+
+def test_qualified_ref_without_workbook_is_name():
+    s = Sheet("Solo")
+    c = Context(sheet=s)  # no workbook -> qualified ref cannot resolve
+    assert evaluate(parse_formula("=Other!A1"), c) == NAME

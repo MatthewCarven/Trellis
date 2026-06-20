@@ -635,3 +635,87 @@ def test_pinned_refs_evaluate_and_recalc_like_plain_ones():
     sh["A1"] = 50                  # pinned refs are the same dependency
     assert sh["B1"].value == 100
     assert sh["C1"].value == 50
+
+
+# --- Cross-sheet references: resolution + recalc (Part 12 row 4) ------------
+
+
+def test_extract_deps_resolves_cross_sheet_via_resolver():
+    ast = parse_formula("=Sheet2!A1 + B2")
+    resolve = lambda name: {"Sheet2": 99}.get(name)
+    # Sheet2!A1 -> owner 99; B2 (unqualified) -> holding id 1
+    assert extract_deps(ast, 1, resolve) == {(99, 0, 0), (1, 1, 1)}
+
+
+def test_extract_deps_unknown_sheet_contributes_no_dep():
+    ast = parse_formula("=Ghost!A1 + B2")
+    resolve = lambda name: None  # no sheet of any name exists
+    assert extract_deps(ast, 1, resolve) == {(1, 1, 1)}
+
+
+def test_cross_sheet_reference_reads_named_sheet():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s2 = wb.add_sheet("Sheet2")
+    s2["A1"] = 42
+    s1["B1"] = "=Sheet2!A1"
+    assert s1["B1"].value == 42
+
+
+def test_cross_sheet_recalcs_when_precedent_changes():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s2 = wb.add_sheet("Sheet2")
+    s2["A1"] = 10
+    s1["B1"] = "=Sheet2!A1 * 2"
+    assert s1["B1"].value == 20
+    s2["A1"] = 100
+    assert s1["B1"].value == 200   # recomputed across sheets
+
+
+def test_cross_sheet_range_sum():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    data = wb.add_sheet("Data")
+    data["A1"] = 1
+    data["A2"] = 2
+    data["A3"] = 3
+    s1["B1"] = "=SUM(Data!A1:A3)"
+    assert s1["B1"].value == 6
+    data["A2"] = 20
+    assert s1["B1"].value == 24
+
+
+def test_quoted_cross_sheet_name_resolves():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    md = wb.add_sheet("My Data")
+    md["A1"] = 7
+    s1["B1"] = "='My Data'!A1"
+    assert s1["B1"].value == 7
+
+
+def test_unknown_sheet_reference_is_name_error():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s1["B1"] = "=Ghost!A1"
+    assert s1["B1"].value == NAME
+
+
+def test_cross_sheet_cycle_is_circ():
+    wb = Workbook()
+    s1 = wb.add_sheet("S1")
+    s2 = wb.add_sheet("S2")
+    s1["A1"] = "=S2!A1"
+    s2["A1"] = "=S1!A1"   # closes a cross-sheet loop
+    assert s2["A1"].value == CIRC
+
+
+def test_self_named_sheet_reference_is_holding_sheet():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s1["A1"] = 5
+    s1["B1"] = "=Sheet1!A1 + 1"
+    assert s1["B1"].value == 6
+    s1["A1"] = 50
+    assert s1["B1"].value == 51

@@ -4,6 +4,38 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-20 — Session 41 (build, cont.): Part 12 row 4 — cross-sheet resolution (=Sheet2!A1 reads Sheet2)
+
+Built **Part 12 row 4** — the resolution layer; `=Sheet2!A1` now actually reads Sheet2 and recomputes
+when Sheet2 changes. `formula/recalc.py`: `extract_deps(ast, sheet_id, resolve=None)` takes a sheet
+name→id resolver — a qualified ref resolves to the *other* sheet's id (dep key `(other_id, r, c)`), an
+unqualified ref stays on the holding sheet, and a ref to an **unknown** sheet contributes no
+dependency (the formula evals to `NAME`, recovering if re-entered once the sheet exists). The engine
+supplies `_resolve_sheet_id(name)` (Workbook is name-keyed → `wb[name].id`) and now builds the eval
+`Context` with `workbook=self._workbook`. `formula/evaluator.py`: `Context` gains `workbook`; a new
+`_resolve_sheet(name, ctx)` maps `None`→holding sheet, a known name→that Sheet, an unknown name (or no
+workbook)→`NAME`; `_eval_cellref`/`_eval_rangeref` route through it. Cross-sheet propagation needed no
+new wiring — the engine already subscribes to every sheet's `cell:change` and the graph has been
+workbook-level since Part 2, so an `(other_id, …)` dep just works; cross-sheet cycles are caught by
+the existing `_would_cycle` (keys are global).
+
+Chose `Context.workbook` over a resolver-callback (design.md Part 12 open question) — the evaluator
+only needs name→sheet lookup and the whole-Workbook handle is the simplest seam.
+
+**Tests (+12):** `extract_deps` resolver + unknown-skip; cross-sheet read / recalc-on-precedent /
+range SUM / quoted-name / unknown→`NAME` / cross-sheet cycle→`CIRC` / self-named-sheet (test_recalc.
+py); evaluator-level resolve + unknown→`NAME` + no-workbook→`NAME` (test_formula_evaluator.py).
+**Core 843 → 855, green** (incl. doctests).
+
+**Still row 5:** `sheet:rename` text-rewrite sweep (a renamed sheet's referrers keep stale text → they
+re-resolve to `NAME` on re-entry until rewritten — the live id-keyed graph keeps working meanwhile)
+and `sheet:remove`→`REF` re-eval (today a removed referenced sheet leaves dependents on their last
+value). **Uncommitted** — files: `formula/recalc.py`, `evaluator.py`, `tests/test_recalc.py`, `tests/
+test_formula_evaluator.py`, `design.md`, `WORKLOG.md`. NEXT: row 5, then row 6 (docs).
+
+---
+
+
 ## 2026-06-20 — Session 41 (build, cont.): Part 12 row 3 — cross-sheet *syntax* (parse-only)
 
 Built **Part 12 row 3**: `Sheet2!A1` now lexes and parses into the AST (no resolution yet — row 4).

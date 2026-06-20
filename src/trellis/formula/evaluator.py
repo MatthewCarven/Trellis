@@ -38,6 +38,7 @@ from .functions import get_function
 
 if TYPE_CHECKING:
     from trellis.core.sheet import Sheet
+    from trellis.core.workbook import Workbook
 
 
 @dataclass
@@ -45,12 +46,14 @@ class Context:
     """Evaluation context — what cell references resolve against.
 
     Attributes:
-        sheet: The Sheet whose cells the formula's CellRef / RangeRef nodes
-            resolve against. Cross-sheet refs (``Sheet2!A1``) are not
-            supported in v1.
+        sheet: The Sheet a formula's *unqualified* CellRef / RangeRef nodes
+            resolve against (the holding sheet).
+        workbook: The Workbook used to resolve *sheet-qualified* refs
+            (``Sheet2!A1``) by name; ``None`` for a bare-sheet evaluation,
+            where a qualified ref then yields ``NAME``.
         current_cell: Optional ``(row, col)`` of the cell holding the formula.
-            Used by the recalc engine (task #18) for circular-reference
-            detection. The evaluator itself does not read it in v1.
+            Used by the recalc engine for circular-reference detection. The
+            evaluator itself does not read it.
 
     The :meth:`evaluate` method is a thin wrapper around the module-level
     :func:`evaluate` function — provided so lazy-arg functions can write
@@ -59,6 +62,7 @@ class Context:
 
     sheet: "Sheet"
     current_cell: tuple[int, int] | None = None
+    workbook: "Workbook | None" = None
 
     def evaluate(self, node: Any) -> Any:
         """Evaluate ``node`` in this context. Convenience for lazy functions."""
@@ -103,20 +107,38 @@ def evaluate(node: Any, ctx: Context) -> Any:
 # --- Reference resolution ------------------------------------------------
 
 
+def _resolve_sheet(sheet_name: Any, ctx: Context):
+    # Resolve a ref's sheet to a Sheet object. None (unqualified) -> the
+    # holding ctx.sheet. A qualified name is looked up in ctx.workbook by name;
+    # an unknown name (or no workbook) yields NAME, which bubbles up like any
+    # other error value.
+    if sheet_name is None:
+        return ctx.sheet
+    wb = ctx.workbook
+    if wb is None or sheet_name not in wb:
+        return NAME
+    return wb[sheet_name]
+
+
 def _eval_cellref(node: CellRef, ctx: Context) -> Any:
     """Look up the value of a single cell. Empty cells return None."""
-    cell = ctx.sheet.get((node.row, node.col))
-    return cell.value
+    sheet = _resolve_sheet(node.sheet, ctx)
+    if isinstance(sheet, FormulaError):
+        return sheet
+    return sheet.get((node.row, node.col)).value
 
 
-def _eval_rangeref(node: RangeRef, ctx: Context) -> list:
+def _eval_rangeref(node: RangeRef, ctx: Context) -> Any:
     """Return a flat list of values for every position in the range, row-major.
 
     Empty cells contribute ``None`` to the list (not skipped — preserves shape).
     """
+    sheet = _resolve_sheet(node.start.sheet, ctx)
+    if isinstance(sheet, FormulaError):
+        return sheet
     start = (node.start.row, node.start.col)
     end = (node.end.row, node.end.col)
-    return list(ctx.sheet.range((start, end)).values())
+    return list(sheet.range((start, end)).values())
 
 
 # --- Operators ----------------------------------------------------------
