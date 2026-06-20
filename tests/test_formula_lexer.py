@@ -293,3 +293,42 @@ def test_pinned_ref_in_expression_keeps_stream_shape():
 def test_bare_dollar_lexes_as_ident_for_the_parser_to_reject():
     # Pin placement is the PARSER's job — the lexer just carries the lexeme.
     assert toks("$") == [(TokenKind.IDENT, "$"), (TokenKind.EOF, "")]
+
+
+# --- Sheet-qualifier tokens (Part 12) --------------------------------------
+
+
+def test_bang_is_its_own_token():
+    assert toks("Sheet2!A1") == [
+        (TokenKind.IDENT, "Sheet2"),
+        (TokenKind.BANG, "!"),
+        (TokenKind.IDENT, "A1"),
+        (TokenKind.EOF, ""),
+    ]
+
+
+def test_quoted_sheet_name():
+    assert toks("'My Data'") == [(TokenKind.QUOTED_NAME, "My Data"), (TokenKind.EOF, "")]
+
+
+def test_quoted_sheet_name_doubled_quote_escape():
+    assert toks("'O''Brien'") == [(TokenKind.QUOTED_NAME, "O'Brien"), (TokenKind.EOF, "")]
+
+
+def test_quoted_sheet_name_then_bang_ref():
+    assert toks("'My Data'!A1") == [
+        (TokenKind.QUOTED_NAME, "My Data"),
+        (TokenKind.BANG, "!"),
+        (TokenKind.IDENT, "A1"),
+        (TokenKind.EOF, ""),
+    ]
+
+
+def test_unterminated_quoted_sheet_name_raises():
+    with pytest.raises(ParseError):
+        list(tokenize("'oops"))
+
+
+def test_bang_inside_error_literal_is_not_a_bang_token():
+    # #REF! is one ERROR token — the trailing ! belongs to the code.
+    assert toks("#REF!") == [(TokenKind.ERROR, "#REF!"), (TokenKind.EOF, "")]

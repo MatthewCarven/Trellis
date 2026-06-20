@@ -25,6 +25,8 @@ class TokenKind(Enum):
     IDENT = "ident"      # cell ref, function name, or bool literal — parser decides
     OP = "op"            # arithmetic, comparison, %, &, =
     ERROR = "error"      # error literal: #REF!, #DIV/0!, ... (code str in value)
+    QUOTED_NAME = "quoted_name"  # 'Sheet name' — quoted sheet name ('' escapes)
+    BANG = "bang"        # ! — the sheet/cell separator in Sheet2!A1
     LPAREN = "lparen"
     RPAREN = "rparen"
     COMMA = "comma"
@@ -48,6 +50,7 @@ _PUNCT = {
     ")": (TokenKind.RPAREN, ")"),
     ",": (TokenKind.COMMA, ","),
     ":": (TokenKind.COLON, ":"),
+    "!": (TokenKind.BANG, "!"),
 }
 
 # Single-character operators that never combine with the next character.
@@ -98,6 +101,30 @@ def tokenize(src: str) -> Iterator[Token]:
             if not closed:
                 raise ParseError("Unterminated string literal", pos=start)
             yield Token(TokenKind.STRING, "".join(buf), start)
+            continue
+
+        # Quoted sheet name: '...' with '' as an escaped quote. Only valid
+        # before a '!' (a sheet qualifier); the parser enforces placement.
+        if ch == "'":
+            start = i
+            i += 1
+            buf = []
+            closed = False
+            while i < n:
+                if src[i] == "'":
+                    if i + 1 < n and src[i + 1] == "'":
+                        buf.append("'")
+                        i += 2
+                    else:
+                        i += 1
+                        closed = True
+                        break
+                else:
+                    buf.append(src[i])
+                    i += 1
+            if not closed:
+                raise ParseError("Unterminated quoted sheet name", pos=start)
+            yield Token(TokenKind.QUOTED_NAME, "".join(buf), start)
             continue
 
         # Number: 42, 3.14, .5, 1e3, 1.5e-3

@@ -4,6 +4,35 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-20 — Session 41 (build, cont.): Part 12 row 3 — cross-sheet *syntax* (parse-only)
+
+Built **Part 12 row 3**: `Sheet2!A1` now lexes and parses into the AST (no resolution yet — row 4).
+`formula/ast.py`: `CellRef` gains `sheet: str | None = None` (the name as written, `None` = holding
+sheet; participates in AST equality, invisible to the `(row,col)` coordinate identity). `formula/
+lexer.py`: two new token kinds — `BANG` (`!`, via `_PUNCT`) and `QUOTED_NAME` (`'My Data'` with `''`
+escaping, a branch mirroring the double-quote string lexer). `formula/parser.py`: `_parse_ident`
+checks for a trailing `!` FIRST (a name before `!` is a sheet even if it spells a function `Sum!A1` or
+bool `TRUE!A1`); the cell/range body is factored into `_parse_cell_or_range` (stamps `sheet` on every
+CellRef; the sheet binds the whole range, and a sheet on the range END corner — `A1:Sheet!B2` — is a
+parse error); `_parse_quoted_sheet` handles the `'..'!ref` path.
+
+**Tests:** +6 lexer (BANG, QUOTED_NAME, `''` escape, unterminated, `#REF!` stays one ERROR token) and
++12 parser (qualified cell/range, quoted sheet, `$` pins, range-end-qualified error, bang-without-ref
+error, sheet-name-beats-function/bool, plain ref stays `sheet=None`, equality). **Core 825 → 843,
+green** (incl. doctests). Smoke-checked end to end: the engine ingests `=Sheet2!A1` without crashing
+and preserves the formula text (resolves to the *holding* sheet for now — documented intermediate
+state until row 4 wires `extract_deps` name→id + `Context.workbook` eval).
+
+**Known follow-up (flagged):** `formula/shift.py` is token/text-based and unaware of `!` — copying a
+formula with a cross-sheet ref (clipboard/fill shift) could mis-handle the `Sheet2` token. Out of
+scope for rows 3-5 as written; revisit when cross-sheet meets clipboard. **Uncommitted** (no sandbox
+git creds) — files: `formula/ast.py`, `lexer.py`, `parser.py`, `tests/test_formula_lexer.py`,
+`tests/test_formula_parser.py`, `design.md`, `WORKLOG.md`. NEXT: row 4 — `extract_deps` name→id
+resolution, `Context.workbook`, cross-sheet eval, unknown→`NAME`/`REF`.
+
+---
+
+
 ## 2026-06-20 — Session 41 (build): Part 12 row 2 — Sheet.id + recalc keyed by id (rename-desync fixed)
 
 Built **Part 12 row 2**: the recalc graph now keys on a stable **`Sheet.id`** instead of the mutable

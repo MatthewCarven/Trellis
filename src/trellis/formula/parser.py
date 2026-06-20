@@ -25,6 +25,11 @@ Absolute-reference pins (``$A$1``, ``$A1``, ``A$1``) are accepted anywhere a
 cell reference is; the ``$``s set ``CellRef.col_abs`` / ``row_abs`` and have
 no effect on evaluation (design.md Part 6 — they exist for rewriting tools).
 ``trellis.core.address`` stays ``$``-free; pin knowledge lives here.
+
+Cross-sheet references (``Sheet2!A1``, ``'My Data'!A1:B5``) attach the sheet
+*name* to each ``CellRef`` via ``CellRef.sheet`` (design.md Part 12). The name
+is the IDENT or quoted-name immediately before ``!``; name->id resolution is
+the recalc engine's job, not the parser's.
 """
 
 from __future__ import annotations
@@ -156,6 +161,9 @@ class Parser:
         if tok.kind == TokenKind.IDENT:
             return self._parse_ident(tok)
 
+        if tok.kind == TokenKind.QUOTED_NAME:
+            return self._parse_quoted_sheet(tok)
+
         raise ParseError(
             f"Unexpected token {tok.kind.name} ({tok.value!r})",
             pos=tok.pos,
@@ -182,6 +190,15 @@ class Parser:
 
     def _parse_ident(self, ident_tok: Token):
         text = ident_tok.value
+
+        # Sheet-qualified reference: Name ! cell-or-range (Excel's Sheet2!A1).
+        # Checked first: a name before '!' is a sheet, even if it spells a
+        # function name (Sum!A1) or a bool (TRUE!A1).
+        if self.peek().kind == TokenKind.BANG:
+            self.advance()  # consume !
+            ref_tok = self.expect(TokenKind.IDENT)
+            return self._parse_cell_or_range(ref_tok.value, ref_tok.pos, sheet=text)
+
         upper = text.upper()
 
         # Function call: IDENT(...)
@@ -202,13 +219,32 @@ class Parser:
         if upper == "FALSE":
             return Bool(False)
 
-        # Cell reference (A1-style, optional $ pins); may start a range.
-        try:
-            row, col, col_abs, row_abs = _ref_parts(text)
-        except ValueError:
-            raise ParseError(f"Unknown identifier {text!r}", pos=ident_tok.pos)
+        # Cell reference on the holding sheet (sheet=None); may start a range.
+        return self._parse_cell_or_range(text, ident_tok.pos, sheet=None)
 
-        start = CellRef(row, col, col_abs=col_abs, row_abs=row_abs)
+    def _parse_quoted_sheet(self, name_tok: Token):
+        # A quoted sheet name ('My Data') is only valid as the sheet of a
+        # cross-sheet reference: it must be followed by ! and a cell/range.
+        if self.peek().kind != TokenKind.BANG:
+            raise ParseError(
+                "Quoted sheet name must be followed by '!' and a cell reference",
+                pos=name_tok.pos,
+            )
+        self.advance()  # consume !
+        ref_tok = self.expect(TokenKind.IDENT)
+        return self._parse_cell_or_range(ref_tok.value, ref_tok.pos, sheet=name_tok.value)
+
+    def _parse_cell_or_range(self, ref_text: str, ref_pos: int, sheet: str | None):
+        # Parse an A1 cell reference (optional $ pins), possibly the start of an
+        # A1:B5 range. `sheet` (a name or None) is stamped onto every CellRef.
+        # For a range the sheet binds the whole rectangle; a sheet qualifier on
+        # the range's end corner is a parse error.
+        try:
+            row, col, col_abs, row_abs = _ref_parts(ref_text)
+        except ValueError:
+            raise ParseError(f"Unknown identifier {ref_text!r}", pos=ref_pos)
+
+        start = CellRef(row, col, col_abs=col_abs, row_abs=row_abs, sheet=sheet)
 
         # Range? A1:B5 — only if next is COLON followed by another A1-ish IDENT.
         if self.peek().kind == TokenKind.COLON:
@@ -220,6 +256,12 @@ class Parser:
                 )
             self.advance()  # consume :
             end_tok = self.advance()
+            # The sheet binds the whole range: Sheet!A1:B5, never A1:Sheet!B5.
+            if self.peek().kind == TokenKind.BANG:
+                raise ParseError(
+                    "Range end cannot be sheet-qualified (write Sheet!A1:B5)",
+                    pos=self.peek().pos,
+                )
             try:
                 end_row, end_col, end_cabs, end_rabs = _ref_parts(end_tok.value)
             except ValueError:
@@ -227,7 +269,7 @@ class Parser:
                     f"Invalid cell reference {end_tok.value!r} in range",
                     pos=end_tok.pos,
                 )
-            end = CellRef(end_row, end_col, col_abs=end_cabs, row_abs=end_rabs)
+            end = CellRef(end_row, end_col, col_abs=end_cabs, row_abs=end_rabs, sheet=sheet)
             # Corner-normalise so start is top-left, end is bottom-right.
             # Pin flags travel WITH their coordinate: if the rows swap, their
             # row-pins swap too — a pin belongs to the row/col it pins, not
@@ -240,8 +282,8 @@ class Parser:
                 left_col, left_cabs, right_col, right_cabs = start.col, start.col_abs, end.col, end.col_abs
             else:
                 left_col, left_cabs, right_col, right_cabs = end.col, end.col_abs, start.col, start.col_abs
-            top = CellRef(top_row, left_col, col_abs=left_cabs, row_abs=top_rabs)
-            bot = CellRef(bot_row, right_col, col_abs=right_cabs, row_abs=bot_rabs)
+            top = CellRef(top_row, left_col, col_abs=left_cabs, row_abs=top_rabs, sheet=sheet)
+            bot = CellRef(bot_row, right_col, col_abs=right_cabs, row_abs=bot_rabs, sheet=sheet)
             return RangeRef(top, bot)
 
         return start

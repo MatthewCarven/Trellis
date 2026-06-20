@@ -449,3 +449,67 @@ def test_dollar_in_function_name_parses_as_call():
     # becomes #NAME? at evaluation (errors-are-values), not a parse crash.
     node = parse_formula("SU$M(1)")
     assert node == FunctionCall("SU$M", (Number(1),))
+
+
+# --- Cross-sheet references (Part 12) --------------------------------------
+
+
+def test_sheet_qualified_cell():
+    assert parse_formula("=Sheet2!A1") == CellRef(0, 0, sheet="Sheet2")
+
+
+def test_sheet_qualified_cell_coords():
+    # B3 -> row 2, col 1
+    assert parse_formula("=Data!B3") == CellRef(2, 1, sheet="Data")
+
+
+def test_quoted_sheet_qualified_cell():
+    assert parse_formula("='My Data'!A1") == CellRef(0, 0, sheet="My Data")
+
+
+def test_sheet_qualified_with_pins():
+    assert parse_formula("=Sheet2!$A$1") == CellRef(
+        0, 0, col_abs=True, row_abs=True, sheet="Sheet2"
+    )
+
+
+def test_sheet_qualified_range_binds_whole_rectangle():
+    assert parse_formula("=Sheet2!A1:B2") == RangeRef(
+        CellRef(0, 0, sheet="Sheet2"), CellRef(1, 1, sheet="Sheet2")
+    )
+
+
+def test_sheet_qualified_range_inside_function():
+    assert parse_formula("=SUM(Data!A1:A3)") == FunctionCall(
+        "SUM", (RangeRef(CellRef(0, 0, sheet="Data"), CellRef(2, 0, sheet="Data")),)
+    )
+
+
+def test_plain_ref_has_no_sheet():
+    assert parse_formula("=A1") == CellRef(0, 0, sheet=None)
+    assert parse_formula("=A1").sheet is None
+
+
+def test_sheet_name_beats_function_and_bool():
+    # A name before '!' is a sheet, even if it spells a function or a bool.
+    assert parse_formula("=Sum!A1") == CellRef(0, 0, sheet="Sum")
+    assert parse_formula("=TRUE!A1") == CellRef(0, 0, sheet="TRUE")
+
+
+def test_range_end_cannot_be_sheet_qualified():
+    with pytest.raises(ParseError):
+        parse_formula("=Sheet2!A1:Sheet2!B2")
+
+
+def test_bang_without_cell_ref_raises():
+    with pytest.raises(ParseError):
+        parse_formula("=Sheet2!")
+
+
+def test_quoted_sheet_name_without_bang_raises():
+    with pytest.raises(ParseError):
+        parse_formula("='My Data'")
+
+
+def test_cross_sheet_ref_participates_in_ast_equality():
+    assert parse_formula("=Sheet2!A1") != parse_formula("=A1")

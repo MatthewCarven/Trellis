@@ -45,14 +45,19 @@ class CellRef:
     graph keys on ``(row, col)``). The flags exist for rewriting tools
     (``shift_formula``, design.md Part 6), which shift only unpinned axes.
 
-    No sheet attribute yet — cross-sheet references (``Sheet2!A1``) are out
-    of scope for v1.
+    ``sheet`` is the sheet name as written in a cross-sheet reference
+    (``Sheet2!A1`` -> ``sheet="Sheet2"``), or ``None`` for the holding sheet.
+    It is the *name* — the public string form (design.md Part 12), not the
+    resolved ``sheet_id``; name->id resolution is the recalc engine's job.
+    The name does not affect the ``(row, col)`` coordinate identity but, as a
+    field, it participates in AST equality.
     """
 
     row: int
     col: int
     col_abs: bool = False
     row_abs: bool = False
+    sheet: str | None = None
 
 
 @dataclass(frozen=True)
