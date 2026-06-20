@@ -1453,7 +1453,7 @@ Conversion happens at one seam, exactly like `to_a1`/`parse`: the parser stays p
 | # | What lands | Where |
 |---|------------|-------|
 | 1 | This design pass | design.md Part 12 |
-| 2 | `Sheet.id` (module counter) + a standalone rename-desync **failing test**, then the `sheet_id` graph migration that makes it pass (no new syntax yet) | `core/sheet.py`, `formula/recalc.py` + tests |
+| 2 | **DONE (S41, uncommitted)** — `Sheet.id` (module counter; stable + rename-invariant) + a standalone rename-desync test (verified red on the old name-keyed graph, green after) + the `sheet_id` graph migration. Engine gained a `{sheet_id: sheet}` map for write-back (`Workbook` is name-keyed). Core 821→825 | `core/sheet.py`, `formula/recalc.py` + tests |
 | 3 | Lexer `!`/quoted-name + parser sheet-qualified cell/range + `CellRef.sheet` | `formula/lexer.py`, `parser.py`, `ast.py` + tests |
 | 4 | `extract_deps` name→id resolution; `Context.workbook`; cross-sheet eval; unknown→`NAME`/`REF` | `formula/recalc.py`, `evaluator.py` + tests |
 | 5 | `sheet:rename` text-rewrite sweep; `sheet:remove`→`REF` re-eval | `formula/recalc.py` + tests |

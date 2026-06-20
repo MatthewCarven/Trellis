@@ -3,6 +3,35 @@
 A session-by-session record of what was built, decided, and discovered. Newest entries on top.
 
 ---
+
+## 2026-06-20 — Session 41 (build): Part 12 row 2 — Sheet.id + recalc keyed by id (rename-desync fixed)
+
+Built **Part 12 row 2**: the recalc graph now keys on a stable **`Sheet.id`** instead of the mutable
+sheet name, retiring the S41 rename-desync bug by construction. `core/sheet.py`: a module-level
+`itertools.count(1)` assigns `self.id` at construction (stable across rename, unique per instance,
+session-only — never serialized). `formula/recalc.py`: `CellKey` is now `(sheet_id, row, col)`;
+`extract_deps`, `_key`, `_on_cell_change`, `_process_change`, `_on_sheet_remove`, `_subscribe_sheet`/
+`_on_sheet_add` and the architecture docstring all switched `sheet.name` → `sheet.id`. **Non-obvious
+bit:** `_evaluate_and_write`/`_write` resolved the target via `self._workbook[key[0]]`, but `Workbook`
+is *name*-keyed — so the engine now keeps its own `{sheet_id: sheet}` map (filled in `_subscribe_sheet`,
+dropped in `_on_sheet_remove`, cleared in `detach`) for write-back. No new syntax; no cross-sheet refs
+yet (rows 3-5).
+
+**Tests:** `test_recalc_survives_sheet_rename` (the regression) + `test_recalc_graph_keyed_by_sheet_id_
+not_name` in test_recalc.py; `test_sheet_id_is_unique_per_instance` / `..._stable_across_rename` in
+test_sheet.py; updated `test_engine_cleans_up_when_sheet_removed` to assert on `sh.id` not `"S"`.
+**Verified the regression has teeth:** ran it against HEAD's old name-keyed recalc in an off-mount copy
+→ fails `20 == 200` (B1 stuck at 20, the exact bug); green on the new code. **Full core suite 821 →
+825, all green** (incl. doctests). Edited via the /tmp-script protocol; pytest needed `pip install
+pytest --break-system-packages` in the fresh sandbox.
+
+**Uncommitted** (sandbox has no git creds). Files for Matthew's commit+push: `src/trellis/core/
+sheet.py`, `src/trellis/formula/recalc.py`, `tests/test_recalc.py`, `tests/test_sheet.py`, `design.md`,
+`WORKLOG.md` (+ the earlier S41 design edits). NEXT: Part 12 row 3 — lexer `!` + quoted names, parser
+sheet-qualifier, `CellRef.sheet`.
+
+---
+
 ## 2026-06-20 — Session 41 (design): cross-sheet refs design pass + a latent rename bug
 
 Matthew opened the "how do sheet references name things?" question and we settled it in design only

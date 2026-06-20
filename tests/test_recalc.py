@@ -418,10 +418,35 @@ def test_engine_cleans_up_when_sheet_removed():
     sh["A1"] = 10
     sh["B1"] = "=A1"
     keys_before = list(wb.recalc._asts.keys())
-    assert any(k[0] == "S" for k in keys_before)
+    assert any(k[0] == sh.id for k in keys_before)
     wb.remove_sheet("S")
     keys_after = list(wb.recalc._asts.keys())
-    assert not any(k[0] == "S" for k in keys_after)
+    assert not any(k[0] == sh.id for k in keys_after)
+
+
+def test_recalc_survives_sheet_rename():
+    # Renaming a sheet must not desync the dependency graph (the S41 bug,
+    # design.md Part 12): the graph keys on the stable Sheet.id, not the
+    # mutable name, so a formula registered pre-rename still recomputes when
+    # its precedent changes afterward.
+    wb = Workbook()
+    sh = wb.add_sheet("Data")
+    sh["A1"] = 10
+    sh["B1"] = "=A1 * 2"
+    assert sh["B1"].value == 20
+    wb.rename_sheet("Data", "Renamed")
+    sh["A1"] = 100
+    assert sh["B1"].value == 200   # was stuck at 20 under the name-keyed graph
+
+
+def test_recalc_graph_keyed_by_sheet_id_not_name():
+    # The dependency graph keys carry the sheet's stable id, not its name.
+    wb = Workbook()
+    sh = wb.add_sheet("Data")
+    sh["A1"] = 1
+    sh["B1"] = "=A1"
+    assert all(k[0] == sh.id for k in wb.recalc._asts)
+    assert all(isinstance(k[0], int) for k in wb.recalc._asts)
 
 
 def test_detach_stops_recalc():

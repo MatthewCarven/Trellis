@@ -505,3 +505,19 @@ def test_write_csv_all_empty_sheet_writes_empty_file(tmp_path):
     out = tmp_path / "e.csv"
     s.to_csv(out)
     assert out.read_text(encoding="utf-8") == ""
+
+
+def test_sheet_id_is_unique_per_instance():
+    a = Sheet("a")
+    b = Sheet("b")
+    assert a.id != b.id
+    assert isinstance(a.id, int)
+
+
+def test_sheet_id_is_stable_across_rename():
+    from trellis import Workbook
+    wb = Workbook()
+    sh = wb.add_sheet("Data")
+    before = sh.id
+    wb.rename_sheet("Data", "Renamed")
+    assert sh.id == before

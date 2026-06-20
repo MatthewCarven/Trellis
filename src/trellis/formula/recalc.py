@@ -22,9 +22,10 @@ the engine in an infinite loop.
 Dependency model
 ----------------
 
-A "cell key" is a tuple ``(sheet_name, row, col)``. Even though cross-sheet
-references are out for v1, keying by sheet name future-proofs the graph and
-keeps the algorithms identical when we add cross-sheet support.
+A "cell key" is a tuple ``(sheet_id, row, col)`` — the sheet's stable identity,
+not its (mutable) name. Keying on the id means a rename can never desync the
+graph (the S41 bug; design.md Part 12). Name resolution happens at the formula-
+text boundary once cross-sheet refs land; the holding sheet supplies its own id.
 
 For each formula cell ``C``::
 
@@ -66,32 +67,32 @@ if TYPE_CHECKING:
     from trellis.core.workbook import Workbook
 
 
-CellKey = tuple[str, int, int]
+CellKey = tuple[int, int, int]
 
 
 # --- Dependency extraction ---------------------------------------------
 
 
-def extract_deps(ast: Any, sheet_name: str) -> set[CellKey]:
+def extract_deps(ast: Any, sheet_id: int) -> set[CellKey]:
     """Return the set of cell keys this AST references.
 
     ``RangeRef`` nodes expand to the full rectangle of positions. ``CellRef``
     contributes one position. Literals (Number, String, Bool) contribute
     nothing. UnaryOp/BinaryOp/FunctionCall recurse into operands/args.
 
-    The sheet name is supplied by the caller; cross-sheet refs are out
-    for v1 so a CellRef has no sheet of its own — it always belongs to the
-    holding sheet.
+    The holding sheet's id is supplied by the caller; cross-sheet refs are
+    out for v1 so a CellRef has no sheet of its own — it always belongs to
+    the holding sheet.
     """
     deps: set[CellKey] = set()
 
     def walk(node: Any) -> None:
         if isinstance(node, CellRef):
-            deps.add((sheet_name, node.row, node.col))
+            deps.add((sheet_id, node.row, node.col))
         elif isinstance(node, RangeRef):
             for r in range(node.start.row, node.end.row + 1):
                 for c in range(node.start.col, node.end.col + 1):
-                    deps.add((sheet_name, r, c))
+                    deps.add((sheet_id, r, c))
         elif isinstance(node, UnaryOp):
             walk(node.operand)
         elif isinstance(node, BinaryOp):
@@ -136,7 +137,8 @@ class RecalcEngine:
         self._asts: dict[CellKey, Any] = {}
         self._dependents: dict[CellKey, set[CellKey]] = defaultdict(set)
         self._dependencies: dict[CellKey, set[CellKey]] = defaultdict(set)
-        self._sheet_subs: dict[str, Any] = {}
+        self._sheet_subs: dict[int, Any] = {}
+        self._sheets_by_id: dict[int, Sheet] = {}
         self._workbook_subs: list[Any] = []
         # Re-entry guard. Recalc engine writes via _set_value (cell:recalc),
         # not set (cell:change), so it shouldn't re-trigger itself. But a
@@ -169,6 +171,7 @@ class RecalcEngine:
         for sub in self._workbook_subs:
             sub()
         self._sheet_subs.clear()
+        self._sheets_by_id.clear()
         self._workbook_subs.clear()
         self._workbook = None
 
@@ -192,19 +195,21 @@ class RecalcEngine:
             "sheet:batch",
             lambda **ev: self._on_batch(ev["sheet"], ev["changes"]),
         )
-        self._sheet_subs[sheet.name] = [change_sub, batch_sub]
+        self._sheet_subs[sheet.id] = [change_sub, batch_sub]
+        self._sheets_by_id[sheet.id] = sheet
 
     def _on_sheet_add(self, sheet: Sheet) -> None:
-        if sheet.name not in self._sheet_subs:
+        if sheet.id not in self._sheet_subs:
             self._subscribe_sheet(sheet)
 
     def _on_sheet_remove(self, name: str, sheet: Sheet) -> None:
-        subs = self._sheet_subs.pop(name, None)
+        subs = self._sheet_subs.pop(sheet.id, None)
+        self._sheets_by_id.pop(sheet.id, None)
         if subs is not None:
             for sub in subs:
                 sub()
         # Drop graph entries owned by this sheet
-        to_drop = [k for k in self._asts if k[0] == name]
+        to_drop = [k for k in self._asts if k[0] == sheet.id]
         for k in to_drop:
             self._remove_deps(k)
             del self._asts[k]
@@ -212,7 +217,7 @@ class RecalcEngine:
         # sheets that referenced removed cells will simply see None on
         # next eval — fine.
         for k in list(self._dependents):
-            if k[0] == name:
+            if k[0] == sheet.id:
                 del self._dependents[k]
 
     # --- cell:change handler -------------------------------------------
@@ -220,7 +225,7 @@ class RecalcEngine:
     def _on_cell_change(
         self, sheet: Sheet, address: tuple[int, int], old: Cell, new: Cell
     ) -> None:
-        key = self._key(sheet.name, address)
+        key = self._key(sheet.id, address)
         if key in self._processing:
             return
         self._processing.add(key)
@@ -262,7 +267,7 @@ class RecalcEngine:
                 self._propagate(key, trigger)
                 return
 
-            deps = extract_deps(ast, sheet.name)
+            deps = extract_deps(ast, sheet.id)
 
             if self._would_cycle(key, deps):
                 sheet._set_value((key[1], key[2]), CIRC, trigger=trigger)
@@ -369,7 +374,9 @@ class RecalcEngine:
         ast = self._asts.get(key)
         if ast is None or self._workbook is None:
             return
-        sheet = self._workbook[key[0]]
+        sheet = self._sheets_by_id.get(key[0])
+        if sheet is None:
+            return
         ctx = Context(sheet=sheet, current_cell=(key[1], key[2]))
         result = evaluate(ast, ctx)
         sheet._set_value((key[1], key[2]), result, trigger=trigger)
@@ -379,16 +386,18 @@ class RecalcEngine:
     ) -> None:
         if self._workbook is None:
             return
-        sheet = self._workbook[key[0]]
+        sheet = self._sheets_by_id.get(key[0])
+        if sheet is None:
+            return
         sheet._set_value((key[1], key[2]), value, trigger=trigger)
 
     # --- helpers --------------------------------------------------------
 
     @staticmethod
-    def _key(sheet_name: str, addr: str | tuple[int, int]) -> CellKey:
+    def _key(sheet_id: int, addr: str | tuple[int, int]) -> CellKey:
         from trellis.core.address import parse as parse_addr
         if isinstance(addr, str):
             row, col = parse_addr(addr)
         else:
             row, col = addr
-        return (sheet_name, row, col)
+        return (sheet_id, row, col)

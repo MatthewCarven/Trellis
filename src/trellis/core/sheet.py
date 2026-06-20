@@ -43,9 +43,12 @@ Public surface:
     sheet.on("cell:recalc", handler) -> Subscription   # post-recalc updates
     sheet.batch()           -> context manager (buffer writes, one event)
     sheet.used_range()      -> ((minr,minc),(maxr,maxc)) | None  (non-empty extent)
+    sheet.id                -> int  (stable per-sheet identity; rename-invariant)
 """
 
 from __future__ import annotations
+
+import itertools
 
 from collections.abc import Iterator
 from typing import Any, Union
@@ -57,6 +60,12 @@ from .events import Emitter
 from .range import Range
 
 Address = Union[str, tuple[int, int]]
+
+# Monotonic, process-wide sheet identity, assigned at construction so a Sheet
+# has a stable id before it joins a Workbook (REPL-first) and a rename never
+# changes identity. Session-only — never serialized (design.md Part 12): CSV is
+# nameful text, so names re-resolve to fresh ids on load.
+_id_counter = itertools.count(1)
 
 
 def _coerce(addr: Address) -> tuple[int, int]:
@@ -105,6 +114,7 @@ class Sheet(Emitter):
     """
 
     def __init__(self, name: str = "Sheet1"):
+        self.id: int = next(_id_counter)
         self.name = name
         self._cells: dict[tuple[int, int], Cell] = {}
         self.meta: dict[str, Any] = {}  # plugin scratch space; core never writes here
