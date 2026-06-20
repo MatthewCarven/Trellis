@@ -4,6 +4,42 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-20 — Session 41 (build, cont.): Part 12 row 5 — rename rewrite + remove re-eval
+
+Built **Part 12 row 5**, closing the cross-sheet lifecycle. `shift.py`: new `rename_sheet_in_formula(
+text, old, new)` — a token-splice (sibling of `shift_formula`) that rewrites only sheet-qualifier
+spans (`IDENT`/`QUOTED_NAME` immediately before `!`) whose name == old, preserving the rest byte-for-
+byte; the new name is emitted bare when it's a plain identifier, else single-quoted (`''`-escaped) via
+`_render_sheet_name`. String literals and plain cells of the same spelling are untouched.
+
+`recalc.py` now subscribes to `sheet:rename` and `sheet:remove`:
+- **rename** — for every referrer (reverse set in `_dependents[(sheet.id, …)]`), rewrite the cell's
+  formula text AND re-parse its AST in place. The AST update is the subtle bit: the evaluator resolves
+  the sheet *by name*, so a stale AST name would make a cross-sheet ref resolve to `NAME` on the next
+  recompute — not just break a saved CSV. Quiet (no recompute/events): a rename moves no data, the
+  id-keyed deps are unchanged, the value is identical.
+- **remove** — capture cross-sheet referrers before teardown, then re-register them; the re-parse
+  drops the now-dead dep and the broken ref resolves to `NAME`, cascading to dependents.
+
+**Decision (S41):** a removed-sheet ref surfaces `NAME`, uniform with an unknown sheet (row 4) —
+distinguishing "removed" from "never existed" needs per-ref provenance and isn't worth it; Excel uses
+`#REF!`. Updated design.md error model + the Rename/Remove notes accordingly.
+
+**Tests (+15):** `rename_sheet_in_formula` unit tests (bare/quoted/`''`-escape/range/only-matching/
+string-literal-safety/identity/untokenizable) in test_formula_shift.py; integration in test_recalc.py
+— cross-sheet ref survives a target rename (text rewritten, live recalc intact), rename→spaced name
+quotes the formula, removed→`NAME` + cascade, intra-sheet rename regression. **Core 855 → 870, green**
+(incl. doctests).
+
+**Still flagged:** `shift_formula` (the OTHER rewriter) remains `!`-unaware — copying a formula with a
+cross-sheet ref (clipboard/fill) could still mishandle the `Sheet2` token; out of Part 12 scope as
+written. **Uncommitted** — files: `formula/shift.py`, `recalc.py`, `tests/test_formula_shift.py`,
+`tests/test_recalc.py`, `design.md`, `WORKLOG.md`. NEXT: row 6 — docs (README Extending/syntax, TUI
+README cross-sheet note) = Part 12 closeout.
+
+---
+
+
 ## 2026-06-20 — Session 41 (build, cont.): Part 12 row 4 — cross-sheet resolution (=Sheet2!A1 reads Sheet2)
 
 Built **Part 12 row 4** — the resolution layer; `=Sheet2!A1` now actually reads Sheet2 and recomputes

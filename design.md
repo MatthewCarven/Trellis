@@ -1424,12 +1424,12 @@ Conversion happens at one seam, exactly like `to_a1`/`parse`: the parser stays p
 ## Error model (constants already exist)
 
 - Unknown sheet name at resolve/eval → `NAME` (an unknown identifier).
-- Reference into a sheet removed while referenced → `REF`, **non-destructively**: the formula text keeps `Sheet2!A1` and recovers if a sheet of that name returns. (Excel's destructive rewrite to `#REF!` is rejected — see below.)
+- Reference into a sheet removed while referenced → `NAME` (**decision S41**: uniform with an unknown sheet — distinguishing removed-vs-never-existed would need per-ref provenance, not worth it; Excel uses `#REF!`). Non-destructive: the formula text keeps `Sheet2!A1` and recovers if a sheet of that name returns and the cell is re-entered.
 
 ## Rename & remove
 
-- **Rename** — the graph is id-keyed, so it's untouched; the only job is keeping *text* honest so saved CSVs reload. The engine subscribes to `sheet:rename` and rewrites the formula text of the bounded set of cells whose AST references the renamed `sheet_id` (it already holds that reverse set in `_dependents`), re-rendering `OldName!…` → `NewName!…`. No graph rekey — that's the whole point of the id.
-- **Remove** — `sheet:remove` re-evaluates the removed sheet's cross-sheet dependents so they surface `REF` (today they'd silently read `None`/`0`).
+- **Rename** — the graph is id-keyed, so dependencies need no rekey. The engine subscribes to `sheet:rename` and, for the bounded set of referrers (the reverse set in `_dependents`), rewrites both the formula *text* and the stored *AST* `OldName!…` → `NewName!…`. Both matter: the text so a saved CSV reloads, the AST because the evaluator resolves the sheet *by name* — a stale AST name would resolve to `NAME` on the next cross-sheet recompute, not only on reload. Done quietly (a rename moves no data, so values don't recompute). No graph rekey — the whole point of the id.
+- **Remove** — `sheet:remove` re-registers the removed sheet's cross-sheet dependents: a re-parse drops the dead dep and the broken ref resolves to `NAME`, cascading to their dependents — instead of silently keeping a stale value.
 
 ## Rejected / deferred
 
@@ -1456,7 +1456,7 @@ Conversion happens at one seam, exactly like `to_a1`/`parse`: the parser stays p
 | 2 | **DONE (S41, uncommitted)** — `Sheet.id` (module counter; stable + rename-invariant) + a standalone rename-desync test (verified red on the old name-keyed graph, green after) + the `sheet_id` graph migration. Engine gained a `{sheet_id: sheet}` map for write-back (`Workbook` is name-keyed). Core 821→825 | `core/sheet.py`, `formula/recalc.py` + tests |
 | 3 | **DONE (S41, uncommitted)** — `TokenKind.BANG`+`QUOTED_NAME` (`!`; `'..'` with `''` escape) + parser sheet-qualifier (`_parse_ident` checks `!` first; factored `_parse_cell_or_range`/`_parse_quoted_sheet`) + `CellRef.sheet`. Parse-only — resolves to holding sheet until row 4. Core 825→843 | `formula/lexer.py`, `parser.py`, `ast.py` + tests |
 | 4 | **DONE (S41, uncommitted)** — `extract_deps(ast, sheet_id, resolve)` (unknown sheet → no dep); engine `_resolve_sheet_id`; `Context.workbook` + evaluator `_resolve_sheet` cross-sheet read; unknown sheet → `NAME`. (Removed-sheet→`REF` re-eval moved to row 5.) Core 843→855 | `formula/recalc.py`, `evaluator.py` + tests |
-| 5 | `sheet:rename` text-rewrite sweep; `sheet:remove`→`REF` re-eval | `formula/recalc.py` + tests |
+| 5 | **DONE (S41, uncommitted)** — `sheet:rename` rewrites referrers' text **and** AST in place (`rename_sheet_in_formula` token-splice in `shift.py`; quiet/value-preserving) so cross-sheet refs survive a target rename; `sheet:remove` re-registers referrers → broken ref → `NAME` (cascades). Core 855→870 | `formula/recalc.py`, `shift.py` + tests |
 | 6 | Docs: README "Extending"/syntax, TUI README cross-sheet note, design rows, worklog | docs |
 
 Row 2 is deliberately first and self-contained: it closes the live rename bug and proves the id model with a test *before* any new syntax exists.

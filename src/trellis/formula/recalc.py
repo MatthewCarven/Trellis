@@ -60,6 +60,7 @@ from .ast import BinaryOp, CellRef, FunctionCall, RangeRef, UnaryOp
 from .errors import CIRC, NAME, FormulaError, ParseError
 from .evaluator import Context, evaluate
 from .parser import parse_formula
+from .shift import rename_sheet_in_formula
 
 if TYPE_CHECKING:
     from trellis.core.cell import Cell
@@ -178,6 +179,9 @@ class RecalcEngine:
         self._workbook_subs.append(
             workbook.on("sheet:remove", self._on_sheet_remove)
         )
+        self._workbook_subs.append(
+            workbook.on("sheet:rename", self._on_sheet_rename)
+        )
 
     def detach(self) -> None:
         """Unsubscribe everything. The engine becomes inert until reattached."""
@@ -219,22 +223,68 @@ class RecalcEngine:
             self._subscribe_sheet(sheet)
 
     def _on_sheet_remove(self, name: str, sheet: Sheet) -> None:
-        subs = self._sheet_subs.pop(sheet.id, None)
-        self._sheets_by_id.pop(sheet.id, None)
+        removed = sheet.id
+        # Capture cross-sheet dependents (in OTHER sheets) BEFORE we tear the
+        # graph down, so we can re-register them: their refs to the gone sheet
+        # now resolve to NAME instead of silently keeping a stale value.
+        affected = {
+            dep
+            for k in self._dependents
+            if k[0] == removed
+            for dep in self._dependents[k]
+            if dep[0] != removed
+        }
+        subs = self._sheet_subs.pop(removed, None)
+        self._sheets_by_id.pop(removed, None)
         if subs is not None:
             for sub in subs:
                 sub()
-        # Drop graph entries owned by this sheet
-        to_drop = [k for k in self._asts if k[0] == sheet.id]
+        # Drop graph entries owned by this sheet.
+        to_drop = [k for k in self._asts if k[0] == removed]
         for k in to_drop:
             self._remove_deps(k)
             del self._asts[k]
-        # Drop _dependents entries keyed in this sheet. Cells in OTHER
-        # sheets that referenced removed cells will simply see None on
-        # next eval — fine.
         for k in list(self._dependents):
-            if k[0] == sheet.id:
+            if k[0] == removed:
                 del self._dependents[k]
+        # Re-register surviving cross-sheet dependents: re-parsing drops the
+        # now-dead dep and re-evaluation surfaces the broken ref as NAME, which
+        # then cascades to anything depending on them.
+        for key in affected:
+            s = self._sheets_by_id.get(key[0])
+            if s is None:
+                continue
+            cell = s.get((key[1], key[2]))
+            if cell.formula:
+                self._process_change(s, key, cell, cell)
+
+    def _on_sheet_rename(self, old: str, new: str, sheet: Sheet) -> None:
+        # The id-keyed graph is rename-invariant, so dependencies need no
+        # rekey. But a cross-sheet ref stores the sheet NAME in both its
+        # formula text and its AST; left stale, referrers would resolve to NAME
+        # after the rename (the evaluator resolves the sheet by name) and a save
+        # would persist the old name. Rewrite the text of every referrer
+        # old->new and re-parse its AST in place. A rename moves no data, so the
+        # value is unchanged — update quietly, no recompute or events.
+        referrers = set()
+        for k in self._dependents:
+            if k[0] == sheet.id:
+                referrers |= self._dependents[k]
+        for key in referrers:
+            s = self._sheets_by_id.get(key[0])
+            if s is None:
+                continue
+            cell = s.get((key[1], key[2]))
+            if not cell.formula:
+                continue
+            new_text = rename_sheet_in_formula(cell.formula, old, new)
+            if new_text == cell.formula:
+                continue
+            cell.formula = new_text
+            try:
+                self._asts[key] = parse_formula(new_text)
+            except ParseError:
+                pass
 
     # --- cell:change handler -------------------------------------------
 

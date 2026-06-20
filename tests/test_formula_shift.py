@@ -127,3 +127,49 @@ def test_error_literal_evaluates_to_the_constant_and_propagates():
 def test_error_literal_inside_larger_expression_parses():
     node = parse_formula("=1+#REF!")
     assert node == BinaryOp("+", Number(1), Error("#REF!"))
+
+
+# --- rename_sheet_in_formula (Part 12 row 5) -------------------------------
+
+from trellis.formula.shift import rename_sheet_in_formula
+
+
+def test_rename_bare_sheet_qualifier():
+    assert rename_sheet_in_formula("=Sheet2!A1", "Sheet2", "Renamed") == "=Renamed!A1"
+
+
+def test_rename_preserves_rest_byte_for_byte():
+    assert rename_sheet_in_formula("=Sheet2!A1 + B2*3", "Sheet2", "S3") == "=S3!A1 + B2*3"
+
+
+def test_rename_in_range_and_function():
+    assert rename_sheet_in_formula("=SUM(Data!A1:A3)", "Data", "Info") == "=SUM(Info!A1:A3)"
+
+
+def test_rename_to_name_with_space_gets_quoted():
+    assert rename_sheet_in_formula("=Data!A1", "Data", "My Data") == "='My Data'!A1"
+
+
+def test_rename_from_quoted_name_to_bare():
+    assert rename_sheet_in_formula("='My Data'!A1", "My Data", "Data") == "=Data!A1"
+
+
+def test_rename_quoted_to_quoted_with_apostrophe():
+    assert rename_sheet_in_formula("='My Data'!A1", "My Data", "O'Brien") == "='O''Brien'!A1"
+
+
+def test_rename_only_the_matching_name():
+    assert rename_sheet_in_formula("=Sheet2!A1 + Sheet3!B1", "Sheet2", "X") == "=X!A1 + Sheet3!B1"
+
+
+def test_rename_ignores_string_literals_and_plain_cells():
+    # "Data" is a string; Data! is a qualifier; A1 (no bang) is a plain cell.
+    assert rename_sheet_in_formula('="Data" & Data!A1', "Data", "Info") == '="Data" & Info!A1'
+
+
+def test_rename_no_match_is_identity():
+    assert rename_sheet_in_formula("=A1 + B2", "Sheet2", "X") == "=A1 + B2"
+
+
+def test_rename_untokenizable_returns_unchanged():
+    assert rename_sheet_in_formula("=SUM(@", "Sheet2", "X") == "=SUM(@"

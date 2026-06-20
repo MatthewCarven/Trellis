@@ -27,13 +27,15 @@ Excel-shaped edges:
 
 from __future__ import annotations
 
+import re
+
 from trellis.core.address import to_a1
 
 from .errors import ParseError
 from .lexer import Token, TokenKind, tokenize
 from .parser import _ref_parts
 
-__all__ = ["shift_formula"]
+__all__ = ["shift_formula", "rename_sheet_in_formula"]
 
 
 def _try_ref(text: str) -> tuple[int, int, bool, bool] | None:
@@ -143,6 +145,60 @@ def shift_formula(text: str, rows: int = 0, cols: int = 0) -> str:
             (tok.pos, tok.pos + len(tok.value), new if new is not None else "#REF!")
         )
         i += 1
+
+    out: list[str] = []
+    last = 0
+    for start, end, replacement in splices:
+        out.append(text[last:start])
+        out.append(replacement)
+        last = end
+    out.append(text[last:])
+    return "".join(out)
+
+
+_BARE_SHEET_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _render_sheet_name(name: str) -> str:
+    """Render a sheet name for a formula qualifier: bare when it is a plain
+    identifier, else single-quoted with ``'`` doubled (Excel-style)."""
+    if _BARE_SHEET_NAME.match(name):
+        return name
+    return "'" + name.replace("'", "''") + "'"
+
+
+def rename_sheet_in_formula(text: str, old: str, new: str) -> str:
+    """Return ``text`` with every sheet qualifier naming ``old`` rewritten to
+    ``new``, preserving everything else byte-for-byte (a token splice, like
+    :func:`shift_formula`).
+
+    A qualifier is an ``IDENT`` or a ``'quoted name'`` immediately followed by
+    ``!``. The new name is emitted bare when it is a plain identifier, else
+    quoted. Same-spelled tokens that are NOT sheet qualifiers (a string literal
+    ``"Old"``, a plain cell ``Old``) are left untouched. Text the lexer can't
+    tokenize is returned unchanged.
+    """
+    try:
+        tokens = list(tokenize(text))
+    except ParseError:
+        return text
+    rendered = _render_sheet_name(new)
+    splices: list[tuple[int, int, str]] = []
+    for i, tok in enumerate(tokens):
+        if tok.kind not in (TokenKind.IDENT, TokenKind.QUOTED_NAME):
+            continue
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if nxt is None or nxt.kind != TokenKind.BANG:
+            continue
+        if tok.value != old:
+            continue
+        if tok.kind == TokenKind.IDENT:
+            end = tok.pos + len(tok.value)
+        else:
+            # QUOTED_NAME source span = the two quotes + the (doubled) inner
+            # quotes around the unescaped value.
+            end = tok.pos + 2 + len(tok.value) + tok.value.count("'")
+        splices.append((tok.pos, end, rendered))
 
     out: list[str] = []
     last = 0

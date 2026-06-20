@@ -719,3 +719,68 @@ def test_self_named_sheet_reference_is_holding_sheet():
     assert s1["B1"].value == 6
     s1["A1"] = 50
     assert s1["B1"].value == 51
+
+
+# --- Cross-sheet rename / remove (Part 12 row 5) ---------------------------
+
+
+def test_cross_sheet_ref_survives_target_rename():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s2 = wb.add_sheet("Sheet2")
+    s2["A1"] = 10
+    s1["B1"] = "=Sheet2!A1 * 2"
+    assert s1["B1"].value == 20
+    wb.rename_sheet("Sheet2", "Renamed")
+    # text rewritten so a save/reload + re-registration stay correct
+    assert s1["B1"].formula == "=Renamed!A1 * 2"
+    # live recalc still flows through the renamed sheet
+    s2["A1"] = 100
+    assert s1["B1"].value == 200
+
+
+def test_rename_target_to_spaced_name_quotes_formula():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    data = wb.add_sheet("Data")
+    data["A1"] = 5
+    s1["B1"] = "=Data!A1"
+    wb.rename_sheet("Data", "My Data")
+    assert s1["B1"].formula == "='My Data'!A1"
+    data["A1"] = 50
+    assert s1["B1"].value == 50
+
+
+def test_removed_sheet_reference_becomes_name():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s2 = wb.add_sheet("Sheet2")
+    s2["A1"] = 42
+    s1["B1"] = "=Sheet2!A1"
+    assert s1["B1"].value == 42
+    wb.remove_sheet("Sheet2")
+    assert s1["B1"].value == NAME
+
+
+def test_removed_sheet_name_cascades_to_dependents():
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s2 = wb.add_sheet("Sheet2")
+    s2["A1"] = 10
+    s1["B1"] = "=Sheet2!A1"
+    s1["C1"] = "=B1 + 1"
+    assert s1["C1"].value == 11
+    wb.remove_sheet("Sheet2")
+    assert s1["B1"].value == NAME
+    assert s1["C1"].value == NAME   # NAME cascades through dependents
+
+
+def test_intra_sheet_rename_still_recalcs():
+    # Regression guard: row 2's intra-sheet rename safety still holds.
+    wb = Workbook()
+    sh = wb.add_sheet("Data")
+    sh["A1"] = 3
+    sh["B1"] = "=A1 * 2"
+    wb.rename_sheet("Data", "Renamed")
+    sh["A1"] = 30
+    assert sh["B1"].value == 60
