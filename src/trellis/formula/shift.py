@@ -16,6 +16,12 @@ Excel-shaped edges:
   error value, so the pasted formula computes to ``#REF!`` like Excel's.
 - A *range* with either corner off the sheet collapses whole: ``=SUM(A1:B2)``
   shifted up a row becomes ``=SUM(#REF!)``, not ``SUM(#REF!:B1)``.
+- A sheet-qualified reference keeps its sheet name verbatim while the *cell*
+  shifts: ``=Sheet2!A1`` copied a row down is ``=Sheet2!A2``. A bare sheet
+  name that also reads as an A1 cell (``Sheet2`` = column SHEET, row 2) is
+  NOT mistaken for a cell to move. If the qualified cell shifts off the
+  edge the whole reference — sheet and all — collapses to ``#REF!`` (a bare
+  ``Sheet2!#REF!`` would mis-evaluate to ``#NAME?``).
 - Text that doesn't tokenize is returned unchanged — a rewriter must never
   blow up on text the engine itself happily stores (broken formulas are
   values here). Tokenizable-but-unparseable text (``=SUM(A1`` mid-edit) has
@@ -96,8 +102,11 @@ def shift_formula(text: str, rows: int = 0, cols: int = 0) -> str:
     -------
     str
         The rewritten source. References shifted off the sheet edge become
-        the literal ``#REF!`` (a range collapses whole). Everything that is
-        not a shifted reference is preserved byte-for-byte.
+        the literal ``#REF!`` (a range collapses whole). A sheet-qualified
+        reference (``Sheet2!A1``) keeps its sheet name; only the cell
+        shifts, and an off-edge qualified cell collapses sheet-and-all to
+        ``#REF!``. Everything that is not a shifted reference is preserved
+        byte-for-byte.
     """
     try:
         tokens = list(tokenize(text))
@@ -107,8 +116,30 @@ def shift_formula(text: str, rows: int = 0, cols: int = 0) -> str:
     # (start, end, replacement) splice spans, in source order.
     splices: list[tuple[int, int, str]] = []
     i = 0
-    while i < len(tokens):
+    n = len(tokens)
+    while i < n:
         tok = tokens[i]
+
+        # Cross-sheet qualifier: an IDENT or 'quoted name' immediately before a
+        # `!` is a SHEET name, never a cell to shift. (A bare name like `Sheet2`
+        # also happens to parse as the A1 cell SHEET2, so shifting it would
+        # silently re-point the formula at a different sheet.) Step over the
+        # qualifier, but remember where it starts: if the cell it qualifies
+        # falls off the edge, the WHOLE qualified ref — sheet included —
+        # collapses to `#REF!`, because a bare `Sheet2!#REF!` mis-evaluates to
+        # `#NAME?` rather than the `#REF!` the engine reserves for a dead ref.
+        qual_start: int | None = None
+        if (
+            tok.kind in (TokenKind.IDENT, TokenKind.QUOTED_NAME)
+            and i + 1 < n
+            and tokens[i + 1].kind == TokenKind.BANG
+        ):
+            qual_start = tok.pos
+            i += 2  # step over  <sheet> !
+            if i >= n:
+                break
+            tok = tokens[i]
+
         if tok.kind != TokenKind.IDENT or _is_call(tokens, i):
             i += 1
             continue
@@ -117,21 +148,25 @@ def shift_formula(text: str, rows: int = 0, cols: int = 0) -> str:
             i += 1
             continue
 
-        # Range unit (ref COLON ref): shift per-corner; if either corner
-        # dies, the WHOLE range span collapses to #REF! (Excel-shaped).
+        # Range unit (ref COLON ref): shift per-corner; if either corner dies,
+        # the WHOLE range span collapses to #REF! (Excel-shaped). The end corner
+        # must not itself be a sheet qualifier (`A1:Sheet!B2` is not legal — do
+        # not shift a second sheet name).
         if (
-            i + 2 < len(tokens)
+            i + 2 < n
             and tokens[i + 1].kind == TokenKind.COLON
             and tokens[i + 2].kind == TokenKind.IDENT
             and not _is_call(tokens, i + 2)
+            and not (i + 3 < n and tokens[i + 3].kind == TokenKind.BANG)
             and (end_parts := _try_ref(tokens[i + 2].value)) is not None
         ):
             end_tok = tokens[i + 2]
             new_start = _shift_one(parts, rows, cols, tok.value)
             new_end = _shift_one(end_parts, rows, cols, end_tok.value)
             if new_start is None or new_end is None:
+                collapse_start = qual_start if qual_start is not None else tok.pos
                 span_end = end_tok.pos + len(end_tok.value)
-                splices.append((tok.pos, span_end, "#REF!"))
+                splices.append((collapse_start, span_end, "#REF!"))
             else:
                 splices.append((tok.pos, tok.pos + len(tok.value), new_start))
                 splices.append(
@@ -141,9 +176,11 @@ def shift_formula(text: str, rows: int = 0, cols: int = 0) -> str:
             continue
 
         new = _shift_one(parts, rows, cols, tok.value)
-        splices.append(
-            (tok.pos, tok.pos + len(tok.value), new if new is not None else "#REF!")
-        )
+        if new is None:
+            collapse_start = qual_start if qual_start is not None else tok.pos
+            splices.append((collapse_start, tok.pos + len(tok.value), "#REF!"))
+        else:
+            splices.append((tok.pos, tok.pos + len(tok.value), new))
         i += 1
 
     out: list[str] = []

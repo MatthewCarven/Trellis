@@ -57,6 +57,25 @@ CASES = [
     # error literals pass through untouched
     ("=#REF!*2", 5, 5, "=#REF!*2"),
     ("=A1+#DIV/0!", 1, 0, "=A2+#DIV/0!"),
+    # cross-sheet refs (Part 12 follow-up): the sheet qualifier stays put,
+    # only the CELL shifts. A bare name like Sheet2 also reads as the A1
+    # cell SHEET2 and must NOT be shifted as one.
+    ("=Sheet2!A1", 1, 0, "=Sheet2!A2"),
+    ("=Sheet2!A1", 0, 1, "=Sheet2!B1"),
+    ("=Sheet2!A1", 2, 3, "=Sheet2!D3"),
+    ("=Sheet2!A1+A1", 1, 0, "=Sheet2!A2+A2"),     # bare-name regression
+    ("=Sheet2!A1+B2", 1, 0, "=Sheet2!A2+B3"),     # qualified + local mix
+    ("='My Data'!A1", 1, 0, "='My Data'!A2"),     # quoted qualifier
+    ("='My Data'!A1:B2", 1, 1, "='My Data'!B2:C3"),
+    ("=SUM(Sheet2!A1:B2)", 1, 0, "=SUM(Sheet2!A2:B3)"),
+    ("=Sheet2!$A$1", 5, 5, "=Sheet2!$A$1"),       # pins hold under a qualifier
+    ("=Sheet2!A$1", 1, 1, "=Sheet2!B$1"),
+    ("=Sheet2!A1", 0, 0, "=Sheet2!A1"),           # identity
+    # off the edge: the WHOLE qualified ref collapses (sheet dropped) so it
+    # evaluates to #REF!, not the #NAME? a bare Sheet2!#REF! would give.
+    ("=Sheet2!A1", -1, 0, "=#REF!"),
+    ("=SUM(Sheet2!A1:B2)", -5, 0, "=SUM(#REF!)"),
+    ("=Data!A1", 1, 0, "=Data!A2"),               # non-ref name already safe
 ]
 
 
@@ -86,6 +105,34 @@ def test_shifted_formula_round_trips_through_the_engine():
     assert sh["B2"].value == 40
     sh["A2"] = 50
     assert sh["B2"].value == 100              # live dependency on the NEW ref
+
+
+def test_cross_sheet_shift_does_not_corrupt_a_ref_shaped_sheet_name():
+    """Regression (the flagged Part 12 gap): `Sheet2` parses as the A1 cell
+    SHEET2, so a naive shift re-pointed `=Sheet2!A1` at SHEET3. The sheet
+    qualifier must never be the thing that moves."""
+    assert shift_formula("=Sheet2!A1", 1, 0) == "=Sheet2!A2"
+    assert shift_formula("=Sheet2!A1", 0, 1) == "=Sheet2!B1"
+    assert "SHEET3" not in shift_formula("=Sheet2!A1", 1, 0).upper()
+
+
+def test_cross_sheet_shift_round_trips_through_the_engine():
+    """Shift a cross-sheet formula, store it, and the engine agrees: a live
+    dependency on the NEW cell, and an off-edge qualified ref reads #REF!."""
+    wb = Workbook()
+    s1 = wb.add_sheet("Sheet1")
+    s2 = wb.add_sheet("Sheet2")
+    s2["A1"] = 5
+    s2["A2"] = 99
+    s1["B1"] = shift_formula("=Sheet2!A1", 1, 0)   # -> =Sheet2!A2
+    assert s1["B1"].formula == "=Sheet2!A2"
+    assert s1["B1"].value == 99
+    s2["A2"] = 7
+    assert s1["B1"].value == 7                      # live on the shifted ref
+    # off-edge collapses to a clean #REF! (sheet dropped), not #NAME?
+    s1["C1"] = shift_formula("=Sheet2!A1", -1, 0)
+    assert s1["C1"].formula == "=#REF!"
+    assert s1["C1"].value == REF
 
 
 # --- error literals (the #REF! that shift emits is first-class source) ---

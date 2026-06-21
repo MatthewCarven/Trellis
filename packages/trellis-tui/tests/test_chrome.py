@@ -49,6 +49,23 @@ def test_build_app_missing_path_opens_empty_with_path_remembered(tmp_path):
     assert app.sheet.used_range() is None  # nothing loaded, nothing crashed
 
 
+def test_build_app_unreadable_directory_aborts(tmp_path, capsys):
+    """A path that exists but is a directory: clean message, no launch."""
+    app = build_app([str(tmp_path)])  # tmp_path is a dir, so open() -> OSError
+    assert app is None
+    assert "cannot read" in capsys.readouterr().err
+
+
+def test_build_app_undecodable_bytes_aborts(tmp_path, capsys):
+    """Bytes that aren't valid UTF-8 abort with a message, not a traceback."""
+    p = tmp_path / "bad.csv"
+    p.write_bytes(b"\xff\xff\xff")
+    app = build_app([str(p)])
+    assert app is None
+    err = capsys.readouterr().err
+    assert "cannot read" in err and "bad.csv" in err
+
+
 async def test_new_file_status_message(tmp_path):
     p = tmp_path / "fresh.csv"
     app = _app(path=str(p))

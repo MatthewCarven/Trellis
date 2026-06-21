@@ -4,6 +4,85 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-21 — Session 42 (build, cont.): shift_formula made `!`-aware — the cross-sheet × clipboard gap closed
+
+Resolved the follow-up flagged through all of Part 12: `shift_formula` (the copy/paste/fill rewriter)
+was `!`-unaware. It scanned `IDENT` tokens and shifted any that parsed as an A1 cell — but a bare
+sheet name like `Sheet2` parses as a cell too (column `SHEET`, row 2), so `=Sheet2!A1` copied a row
+down became **`=SHEET3!A2`**: the cell shifted (right) and the sheet name shifted with it (silently
+re-pointing the formula at another sheet). Confirmed empirically before touching code.
+
+**Fix (`src/trellis/formula/shift.py`).** A token that is `IDENT`/`QUOTED_NAME` immediately before a
+`!` is a sheet qualifier — the scan steps over it (and the `!`) and shifts only the cell after, so the
+sheet name survives byte-for-byte (`=Sheet2!A1` → `=Sheet2!A2`). Quoted qualifiers were already safe
+(`QUOTED_NAME` ≠ `IDENT`); bare non-cell names (`Data!`) were safe by accident. Range guard also
+refuses a qualifier on the end corner (`A1:Sheet!B2` is illegal). **Off-edge decision:** when the
+qualified cell falls off the sheet the WHOLE ref (sheet included) collapses to `=#REF!` — dropping the
+qualifier on purpose, because a bare `Sheet2!#REF!` mis-evaluates to `#NAME?` whereas `=#REF!` is the
+first-class error the engine reserves for a dead ref (verified: `=Sheet2!#REF!` → `#NAME?`, `=#REF!` →
+`#REF!`). `rename_sheet_in_formula` (the sibling `!`-aware splice from row 5) was already correct,
+untouched.
+
+**Tests (+16; core 880 → 896).** 14 rows added to the `test_formula_shift.py` table (qualified
+single/range shift, bare-name regression, quoted qualifier, pins under a qualifier, identity, off-edge
+collapse, qualified+local mix) + 2 named tests (bare-`Sheet2`-not-corrupted regression; engine round-
+trip — live dependency on the shifted cell, off-edge reads `#REF!`). TUI shift_formula consumers
+regression-clean: test_clipboard + test_fill + test_cut_os_bridge = 37 green. **Suites: core 896
+(--doctest-modules src tests) / TUI clipboard+fill+cut 37.**
+
+**Docs.** design.md Part 12 status note: follow-up marked **resolved (S42)** + a new writeup subsection
+(problem / shape / off-edge decision / tests). No README change needed — the user-facing cross-sheet
+behaviour is unchanged; this fixes a latent corruption in the copy/paste/fill path.
+
+**No open follow-ups from this.** Part 11 and Part 12 are both fully closed and field-clean. NEXT
+(Matthew's call): the planned second-frontend GUI ([[trellis-second-frontend-gui]]) over the packaged
+engine + extracted trellis-keymap, or xlsx (deprioritized per CSV-only).
+
+**Uncommitted** — files: `src/trellis/formula/shift.py`, `tests/test_formula_shift.py`, `design.md`,
+`WORKLOG.md` (on top of the still-uncommitted S42 Part 11 work below). Awaits Matthew's commit + push.
+
+---
+
+## 2026-06-21 — Session 42 (build): Part 11 rows 2 & 3 — CSV read robustness + graceful open; PART 11 COMPLETE
+
+Picked up after S41 (Part 12 complete, pushed). Closed out **Part 11** by landing its last two rows;
+the memory was stale (said S40 latest) — refreshed.
+
+**Row 2 — read robustness (`src/trellis/io/csv.py`).** Two silent Excel-on-Windows mis-loads, fixed.
+(1) BOM: default `encoding` `utf-8` → `utf-8-sig`, which reads plain UTF-8 *and* strips a leading BOM —
+strictly more lenient, no happy-path change; `encoding="utf-8"` is the strict escape hatch. (2)
+Delimiter: new `delimiter: str | None = None` param sniffs from an 8 KB sample when `None`, else forces
+the given char. The sniffer is deliberately NOT `csv.Sniffer` (opaque, raises on single-column) — a
+deterministic rule per [[simplicity-over-clever-solvers]]: `_count_unquoted` counts each candidate
+(`, ; \t |`) *outside* double-quoted spans, `_sniff_delimiter` takes the first line with any candidate
+and returns the most frequent (ties → comma). Quote-aware counting is what makes `"1,5";"2,5"`
+(European decimal-comma inside fields) correctly sniff `;`. No-delimiter file → comma fallback (old
+behaviour preserved). **+10 tests; core 870 → 880**, existing 63 CSV tests unchanged.
+
+**Row 3 — graceful CLI open (`packages/trellis-tui/src/trellis_tui/app.py`, `build_app`).** The per-file
+`read_csv` was unguarded after `exists()`; a path that exists but can't be read (no permission, a
+directory, undecodable bytes, or a TOCTOU vanish) dumped a traceback and killed the launch. Wrapped in
+`try/except (OSError, UnicodeDecodeError)` → prints `trellis: cannot read <path>: <reason>` to stderr
+and `return None`, aborting cleanly — same exit shape as the unknown-`--keymap` branch. **Decision:**
+abort rather than skip-the-bad-file — predictable, nothing half-loads. **+2 tests** (directory +
+undecodable bytes) in `test_chrome.py` (17 → 19).
+
+**Docs.** design.md: rows 2–3 marked DONE with writeups + a **Part 11 COMPLETE (S42)** note (core 821 →
+880 across the part). Main README: a real-world-robustness bullet (BOM-tolerant decode, delimiter sniff,
+atomic write). TUI README: open-robustness + graceful-error sentence in the CSV bullet.
+
+**Out of scope, by design:** non-UTF-8 charset auto-detection (latin-1/cp1252 still need explicit
+`encoding=`) — a bigger, guessier problem. Still-open thread from S41: `shift_formula` is `!`-unaware
+(clipboard × cross-sheet seam), its own future task.
+
+**Uncommitted** — files: `src/trellis/io/csv.py`, `tests/test_io_csv.py`, `packages/trellis-tui/src/
+trellis_tui/app.py`, `packages/trellis-tui/tests/test_chrome.py`, `design.md`, `README.md`,
+`packages/trellis-tui/README.md`, `WORKLOG.md`. (Also `demo.csv` — pre-existing scratch, not mine.)
+**Awaits Matthew's commit + push.** NEXT: Part 11 is done; candidates are the `shift_formula`
+cross-sheet gap or the planned second-frontend GUI.
+
+---
+
 ## 2026-06-20 — Session 41 (build, cont.): Part 12 row 6 — docs; PART 12 COMPLETE
 
 Row 6, the docs closeout. Main README: a cross-sheet paragraph in the library quick taste (`=Costs!A1`,

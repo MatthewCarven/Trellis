@@ -225,6 +225,86 @@ class TestReadCSV:
         # Row 4 is blank — no cell stored.
         assert (3, 0) not in sh._cells
 
+    # -- Row 2: BOM-tolerant default + delimiter sniff ------------------
+
+    def test_bom_stripped_by_default(self, tmp_path):
+        """Default encoding strips an Excel BOM without the caller asking."""
+        p = tmp_path / "bom.csv"
+        p.write_bytes("\ufeffname,age\nAlice,30\n".encode("utf-8"))
+        sh = read_csv(p)["Sheet1"]            # no encoding= passed
+        assert sh["A1"].value == "name"       # BOM gone
+        assert sh["B1"].value == "age"
+
+    def test_no_bom_still_reads_by_default(self, tmp_path):
+        """utf-8-sig default reads a plain (BOM-free) UTF-8 file fine."""
+        p = tmp_path / "plain.csv"
+        p.write_text("name,age\nAlice,30\n", encoding="utf-8")
+        sh = read_csv(p)["Sheet1"]
+        assert sh["A1"].value == "name"
+        assert sh["B2"].value == 30
+
+    def test_explicit_utf8_preserves_bom(self, tmp_path):
+        """The escape hatch: explicit utf-8 is strict, BOM is kept verbatim."""
+        p = tmp_path / "bom.csv"
+        p.write_bytes("\ufeffname\n".encode("utf-8"))
+        sh = read_csv(p, encoding="utf-8")["Sheet1"]
+        assert sh["A1"].value == "\ufeffname"
+
+    def test_sniff_semicolon(self, tmp_path):
+        p = tmp_path / "eu.csv"
+        p.write_text("a;b;c\n1;2;3\n", encoding="utf-8")
+        sh = read_csv(p)["Sheet1"]
+        assert sh["A1"].value == "a"
+        assert sh["C1"].value == "c"
+        assert sh["B2"].value == 2
+
+    def test_sniff_tab(self, tmp_path):
+        p = tmp_path / "t.tsv"
+        p.write_text("a\tb\n1\t2\n", encoding="utf-8")
+        sh = read_csv(p)["Sheet1"]
+        assert sh["A1"].value == "a"
+        assert sh["B2"].value == 2
+
+    def test_sniff_pipe(self, tmp_path):
+        p = tmp_path / "pipe.csv"
+        p.write_text("a|b\n1|2\n", encoding="utf-8")
+        sh = read_csv(p)["Sheet1"]
+        assert sh["B1"].value == "b"
+        assert sh["A2"].value == 1
+
+    def test_single_column_falls_back_to_comma(self, tmp_path):
+        """No delimiter anywhere -> comma fallback, one column, no surprises."""
+        p = tmp_path / "one.csv"
+        p.write_text("hello\nworld\n", encoding="utf-8")
+        sh = read_csv(p)["Sheet1"]
+        assert sh["A1"].value == "hello"
+        assert sh["A2"].value == "world"
+        assert (0, 1) not in sh._cells
+
+    def test_explicit_delimiter_overrides_sniff(self, tmp_path):
+        """delimiter= forces the separator and skips sniffing entirely."""
+        p = tmp_path / "x.csv"
+        p.write_text("a;b,c\n", encoding="utf-8")
+        sh = read_csv(p, delimiter=",")["Sheet1"]
+        assert sh["A1"].value == "a;b"
+        assert sh["B1"].value == "c"
+
+    def test_sniff_ignores_delimiters_inside_quotes(self, tmp_path):
+        """Commas living inside quoted fields don't fool the semicolon sniff."""
+        p = tmp_path / "q.csv"
+        p.write_text('"a,b";"c,d"\n', encoding="utf-8")
+        sh = read_csv(p)["Sheet1"]
+        assert sh["A1"].value == "a,b"
+        assert sh["B1"].value == "c,d"
+
+    def test_bom_and_semicolon_together(self, tmp_path):
+        """The full European-Excel export: BOM + semicolons, zero ceremony."""
+        p = tmp_path / "eu_bom.csv"
+        p.write_bytes("\ufeffname;age\nAlice;30\n".encode("utf-8"))
+        sh = read_csv(p)["Sheet1"]
+        assert sh["A1"].value == "name"
+        assert sh["B2"].value == 30
+
 
 # ---------------------------------------------------------------------
 # write_csv / Sheet.to_csv: save path

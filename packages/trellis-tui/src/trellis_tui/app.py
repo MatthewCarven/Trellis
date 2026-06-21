@@ -1264,7 +1264,10 @@ def build_app(args: list[str]) -> TrellisApp | None:
     loaded via ``read_csv(…, workbook=…)`` — the multi-file seam the
     engine grew in Part 3, consumed at last. A path that doesn't exist
     yet opens an empty tab with the path remembered — ``Ctrl+S``
-    creates the file.
+    creates the file. A path that *exists* but can't be read — no
+    permission, a directory, or undecodable bytes — prints a clean
+    ``trellis: cannot read …`` to stderr and aborts the launch
+    (returns ``None``) rather than dumping a traceback.
 
     ``--keymap NAME`` selects the key language (Part 10): the built-in
     ``excel`` (default) or any keymap registered under the
@@ -1299,7 +1302,21 @@ def build_app(args: list[str]) -> TrellisApp | None:
         if Path(arg).exists():
             # formulas=True mirrors save: =-cells load live, so a file
             # the TUI wrote reopens as the same spreadsheet.
-            read_csv(arg, sheet_name=name, workbook=workbook, formulas=True)
+            try:
+                read_csv(
+                    arg, sheet_name=name, workbook=workbook, formulas=True
+                )
+            except (OSError, UnicodeDecodeError) as error:
+                # Exists but unreadable: permission denied, a directory,
+                # vanished between the check and the open, or not
+                # decodable text. Print one clean line and abort instead
+                # of crashing into a half-loaded session — same exit
+                # shape as the unknown-keymap branch above.
+                print(
+                    f"trellis: cannot read {arg}: {error}",
+                    file=sys.stderr,
+                )
+                return None
         else:
             workbook.add_sheet(name)
         paths[name] = arg

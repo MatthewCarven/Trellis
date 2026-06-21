@@ -1325,8 +1325,8 @@ Picked order (Matthew, S40): atomic save first, then read robustness, then grace
 | # | Item | Status |
 |---|------|--------|
 | 1 | `write_csv` atomic (temp + `os.replace`) | DONE 2026-06-17 (S40) |
-| 2 | Read robustness — UTF-8 BOM + delimiter sniff | planned |
-| 3 | Graceful open errors in the TUI CLI path | planned |
+| 2 | Read robustness — UTF-8 BOM + delimiter sniff | DONE 2026-06-21 (S42) |
+| 3 | Graceful open errors in the TUI CLI path | DONE 2026-06-21 (S42) |
 
 ### Row 1 — atomic save (DONE 2026-06-17, S40)
 **Problem.** `write_csv` opened the destination directly with `"w"`: a save interrupted partway
@@ -1348,6 +1348,58 @@ shaped, a no-op on Windows — a permission quirk must never defeat an otherwise
 (monkeypatched `_stringify`) leaves the original intact, leaves no litter, and propagates; empty-
 sheet write stays atomic; a short overwrite truncates a longer file's stale tail; (POSIX) mode
 0640 preserved across overwrite. No API or happy-path change — pure durability.
+
+### Row 2 — read robustness (DONE 2026-06-21, S42)
+**Problem.** Two ways a real Excel-on-Windows export mis-loaded *silently*. (1) Excel writes a
+UTF-8 BOM; `read_csv` decoded as plain `utf-8` by default, so the first cell arrived as
+`"\ufeffname"` — a header that never matches, a join key that never joins, no error. (2) Outside
+the US, Excel exports semicolon-delimited; the `"excel"` dialect is comma-only, so the whole file
+loaded as a single fat column. Both are the target user's everyday file ([[trellis-file-io-csv-only]]).
+
+**Shape.** (1) Default `encoding` flips `utf-8` → `utf-8-sig`, which reads plain UTF-8 *and* strips a
+leading BOM if present — strictly more lenient, no happy-path change. An explicit `encoding="utf-8"`
+is the escape hatch back to strict, BOM-preserving decoding. (2) New `delimiter: str | None = None`
+param: when `None`, sniff from a bounded sample (8 KB) of the file's first populated line; an explicit
+character forces one and skips the sniff. The sniff stays on the engine's `dialect` for quoting and
+just overrides the delimiter via `csv.reader(..., delimiter=…)`.
+
+**The sniffer.** Deliberately *not* `csv.Sniffer` (opaque, raises on single-column) — a deterministic,
+explainable rule per [[simplicity-over-clever-solvers]]: `_count_unquoted` counts each candidate
+(`, ; \t |`) outside double-quoted spans; `_sniff_delimiter` walks to the first line with any candidate
+and returns the most frequent, ties broken by candidate order (comma first). A file with no delimiter
+anywhere — a genuine single-column CSV — falls back to comma, preserving old behaviour. Quote-aware
+counting is what makes the European case work: `"1,5";"2,5"` (comma as decimal *inside* fields)
+correctly sniffs `;`.
+
+**Tests (+10; core 870 → 880).** BOM stripped by default / kept under explicit `utf-8`; plain no-BOM
+still reads; semicolon/tab/pipe each sniffed; single-column → comma fallback; explicit `delimiter=`
+overrides; commas inside quotes don't fool the sniff; BOM + semicolon together (the full European
+export). Existing 63 CSV tests unchanged — the new default is a pure superset.
+
+### Row 3 — graceful open errors in the TUI CLI (DONE 2026-06-21, S42)
+**Problem.** `build_app`'s per-file load called `read_csv` unguarded after an `exists()` check. A path
+that exists but can't be read — no permission, a *directory*, undecodable bytes, or one that vanished
+between the check and the open (TOCTOU) — dumped a raw traceback and killed the launch. A CLI should
+explain itself.
+
+**Shape.** Wrap the `read_csv` call in `try/except (OSError, UnicodeDecodeError)`; on failure print one
+clean line — `trellis: cannot read <path>: <reason>` — to stderr and `return None`, aborting the
+launch. Same exit shape as the existing unknown-`--keymap` branch. Aborting (vs. skipping the bad
+file) is the predictable choice: you asked for these files, one is unreadable, you're told exactly why
+and nothing half-loads. The discarded workbook may hold a half-added empty sheet — harmless, it's
+thrown away. `OSError` covers permission/`IsADirectoryError`/vanished; `UnicodeDecodeError` (not an
+`OSError`) covers undecodable bytes that survive even `utf-8-sig`.
+
+**Tests (+2; TUI test_chrome 17 → 19).** A directory path and an undecodable-bytes file each return
+`None` and print `cannot read` (+ the filename) to stderr.
+
+**Status — Part 11 COMPLETE (S42).** All three rows landed: atomic save (S40), read robustness
+(BOM-tolerant default + deterministic delimiter sniff), and graceful CLI open errors. The CSV path the
+target user lives on now survives an interrupted save, an Excel BOM, a European semicolon export, and
+an unreadable file — none of which it handled when Part 11 opened. Core 821 → 880 across the part
+(rows 2's +10 here; row 1's +5 in S40). One adjacent thing still *not* done by design: non-UTF-8
+encodings (latin-1, cp1252) still need an explicit `encoding=` — auto-detecting charset is a bigger,
+guessier problem deliberately left out of scope.
 
 
 ## trellis-keymap — the keymap contract becomes its own package (2026-06-17, S40)
@@ -1461,7 +1513,37 @@ Conversion happens at one seam, exactly like `to_a1`/`parse`: the parser stays p
 
 Row 2 is deliberately first and self-contained: it closes the live rename bug and proves the id model with a test *before* any new syntax exists.
 
-**Status — Part 12 COMPLETE (S41).** All six rows landed; the core suite grew 821 → 870 across the part. `Sheet2!A1` / `'My Data'!A1` references resolve, recalc across sheets, survive a target rename (text + AST rewritten), and degrade to `#NAME?` on a missing/removed sheet — all on the stable `sheet_id` graph, which also retired the latent intra-sheet rename-desync bug found in row 2. One follow-up stays flagged: `shift_formula` is `!`-unaware, so clipboard/fill of a formula containing a cross-sheet ref isn't handled yet (its own task when cross-sheet meets the clipboard).
+**Status — Part 12 COMPLETE (S41).** All six rows landed; the core suite grew 821 → 870 across the part. `Sheet2!A1` / `'My Data'!A1` references resolve, recalc across sheets, survive a target rename (text + AST rewritten), and degrade to `#NAME?` on a missing/removed sheet — all on the stable `sheet_id` graph, which also retired the latent intra-sheet rename-desync bug found in row 2. One follow-up stayed flagged through S41 and is now **resolved (S42)** — see below.
+
+### Cross-sheet follow-up — `shift_formula` made `!`-aware (DONE 2026-06-21, S42)
+**Problem.** `shift_formula` (the copy/paste/fill rewriter, Part 6) scanned `IDENT`
+tokens and shifted any that parsed as an A1 cell — but a bare sheet name like
+`Sheet2` *also* parses as a cell (column `SHEET`, row 2). So `=Sheet2!A1` copied a
+row down became `=SHEET3!A2` — the cell shifted (good) **and the sheet name shifted
+too** (catastrophic: the formula silently re-points at a different, usually
+non-existent sheet). Quoted qualifiers (`'My Data'!`) were already safe — they lex as
+`QUOTED_NAME`, not `IDENT` — and bare names that don't read as a cell (`Data!`) were
+safe by accident.
+
+**Shape.** A token that is an `IDENT`/`QUOTED_NAME` immediately before a `!` is a
+sheet qualifier, never a cell: the scan steps over it (and the `!`) and shifts only
+the cell after it, so the sheet name survives byte-for-byte while `=Sheet2!A1` → 
+`=Sheet2!A2`. The range guard also refuses an end corner that is itself a qualifier
+(`A1:Sheet!B2` is illegal syntax — don't shift a second sheet name).
+
+**Off-edge decision.** When the qualified cell shifts off the sheet the WHOLE
+reference — sheet qualifier included — collapses to `#REF!`. The qualifier is dropped
+deliberately: a bare `Sheet2!#REF!` mis-evaluates to `#NAME?` (the parser reads
+`#REF!` as an unknown name after the `!`), whereas `=#REF!` is the first-class error
+literal the engine reserves for a dead reference. So `=Sheet2!A1` shifted off the top
+becomes `=#REF!`, evaluating to `#REF!` exactly like a local ref would.
+
+**Tests (+16; core 880 → 896).** 14 table rows (qualified single/range shift, bare-
+name regression, quoted qualifier, pins under a qualifier, identity, off-edge
+collapse, mixed qualified+local) plus 2 named tests: the bare-`Sheet2`-not-corrupted
+regression and an engine round-trip (live dependency on the shifted cell; off-edge
+reads `#REF!`). `rename_sheet_in_formula` (the other `!`-aware splice, row 5) was
+already correct and is untouched.
 
 ## References
 

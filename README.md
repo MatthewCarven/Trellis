@@ -99,6 +99,7 @@ Events emitted today:
 - `Sheet.used_range()` returns `((min_row, min_col), (max_row, max_col))` (zero-indexed, inclusive) over non-empty cells, or `None` for an empty sheet — what a renderer or exporter calls to find the extent it must walk.
 - `trellis.infer_value(text)` — the conservative text→value rule CSV loading uses (int → float → string; leading zeros, `+` signs, scientific notation stay strings). Public so a frontend can make typed input behave exactly like loaded data.
 - `read_csv(path, formulas=True)` / `sheet.to_csv(path, formulas=True)` — opt-in formula round-trip: `=`-cells load live and save as source text. The default stays values-only/literal-text — an untrusted CSV never smuggles in live formulas, and plain exports carry values other tools can use. The TUI opts in for its own files.
+- Real-world CSV robustness, no flags needed: `read_csv` defaults to a BOM-tolerant decode (strips the byte-order mark Excel-on-Windows writes) and sniffs the field delimiter (comma, semicolon, tab, or pipe) from the file's first line — so a European Excel export (BOM-prefixed, semicolon-separated) loads as columns instead of one fat string. Force either with `encoding="utf-8"` / `delimiter=";"`. Writes are atomic (temp file + `os.replace`), so an interrupted save never truncates your original.
 - `trellis.shift_formula(text, rows, cols)` — rewrite the cell references in a formula string by a paste offset, Excel-style: `$` pins hold their axis (`$A$1` never moves), references shifted off the sheet edge become `#REF!` (a range collapses whole), and everything that doesn't move survives byte-for-byte. Error codes are first-class formula source (`=#REF!*2` parses and evaluates). What the TUI's copy-paste rides on; public so any tool can move formulas around.
 
 The `Emitter` mixin (and `Subscription` handle) are re-exported from `trellis` if you want pub/sub on your own classes — it's a drop-in mixin and doesn't require `super().__init__()`.
@@ -139,8 +140,4 @@ mathpack = "trellis_mathpack:setup"
 
 ### 5. Supply a TUI keymap (frontend hook)
 
-The terminal app has its own extension point: a **keymap** — a whole key language for the grid (the built-in Excel bindings are themselves one). A keymap package registers a factory under the `trellis_keymap.keymaps` entry point and users select it with `trellis --keymap NAME`. The contract (`trellis_keymap`: `Keymap.handle(KeyPress, KeyContext) -> Action | None`) is textual-free and read-only toward the app — the keymap names what a key *means*; the app executes it. The reference: [trellis-tui-vim](packages/trellis-tui-vim) (`trellis --vim`), a full vim language — modes, counts, operators, the `:` command line — in ~450 lines that import only the contract. This is a frontend hook, not an engine one: the core knows nothing of it. Contract doc: [docs/keymap-plugin.md](docs/keymap-plugin.md).
-
-## License
-
-MIT.
+The terminal app has its own extension point: a **keymap** — a whole key language for the grid (the built-in Excel bindings are themselves one). A keymap package registers a factory under the `trellis_keymap.keymaps` entry point and users select it with `trellis --keymap NAME`. The contract (`trellis_keymap`: `Keymap.handl

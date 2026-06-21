@@ -8,7 +8,11 @@ or ``float``, everything else stays a string. Booleans are NOT inferred
 and Excel itself often quotes booleans as strings on CSV export. A
 leading ``=`` is preserved as literal text by default; no surprise
 re-evaluation. Pass ``formulas=True`` to opt in: ``"=..."`` cells are
-stored as live formulas and evaluated once the load batch closes.
+stored as live formulas and evaluated once the load batch closes. By
+default the reader tolerates a UTF-8 BOM and sniffs the field delimiter
+(comma, semicolon, tab, or pipe), so Excel-on-Windows exports — BOM-
+prefixed and often semicolon-separated outside the US — load correctly
+without ceremony.
 
 Write: :func:`write_csv` and the :meth:`trellis.Sheet.to_csv` method
 write a single sheet to a CSV file. By default each cell's ``value`` is
@@ -52,6 +56,12 @@ PathLike = Union[str, Path]
 
 _INFINITES = (float("inf"), -float("inf"))
 
+# Delimiters :func:`read_csv` auto-detects when ``delimiter`` is not given.
+# Order is the tie-break preference; comma also being the no-delimiter
+# fallback keeps the historical default for files that have no separator.
+_SNIFF_DELIMITERS = (",", ";", "\t", "|")
+_SNIFF_SAMPLE_CHARS = 8192
+
 
 def infer_value(s: str) -> int | float | str | None:
     """Infer a Python value from a CSV cell string.
@@ -94,12 +104,54 @@ def infer_value(s: str) -> int | float | str | None:
     return s
 
 
+def _count_unquoted(line: str, ch: str) -> int:
+    """Count ``ch`` in ``line``, ignoring occurrences inside double quotes.
+
+    A minimal quote scanner: every ``"`` flips in/out of a quoted span, so a
+    delimiter sitting inside ``"a,b"`` is not counted. An escaped ``""`` flips
+    twice and nets out, which is exactly what delimiter detection wants. Good
+    enough to tell a real separator from punctuation buried in quoted data; it
+    is deliberately not a full CSV parser.
+    """
+    count = 0
+    in_quotes = False
+    for c in line:
+        if c == '"':
+            in_quotes = not in_quotes
+        elif c == ch and not in_quotes:
+            count += 1
+    return count
+
+
+def _sniff_delimiter(
+    sample: str,
+    candidates: tuple[str, ...] = _SNIFF_DELIMITERS,
+    default: str = ",",
+) -> str:
+    """Guess the field delimiter from a text sample.
+
+    Deterministic and explainable on purpose (the project's
+    simplicity-over-clever-solvers stance, vs. the opaque :class:`csv.Sniffer`):
+    scan to the first line that holds any candidate delimiter outside of quotes
+    and return the most frequent one, ties broken by ``candidates`` order. A
+    file with no delimiter anywhere — a single-column CSV — falls back to
+    ``default`` (comma), preserving the historical behaviour. Callers who
+    already know pass ``delimiter=`` to :func:`read_csv` and skip this.
+    """
+    for line in sample.splitlines():
+        counts = {d: _count_unquoted(line, d) for d in candidates}
+        if any(counts.values()):
+            return max(candidates, key=lambda d: counts[d])
+    return default
+
+
 def read_csv(
     path: PathLike,
     *,
     sheet_name: str = "Sheet1",
-    encoding: str = "utf-8",
+    encoding: str = "utf-8-sig",
     dialect: str = "excel",
+    delimiter: str | None = None,
     workbook: Workbook | None = None,
     formulas: bool = False,
 ) -> Workbook:
@@ -115,11 +167,23 @@ def read_csv(
     sheet_name
         Name for the new sheet. Defaults to ``"Sheet1"``.
     encoding
-        File encoding. Defaults to UTF-8. Pass ``"utf-8-sig"`` if the
-        file was written by Excel with a BOM.
+        File encoding. Defaults to ``"utf-8-sig"``, which reads plain
+        UTF-8 *and* transparently strips a leading byte-order mark — the
+        BOM Excel-on-Windows writes on CSV export — so the first cell
+        never arrives with a stray BOM glued to it. Pass an explicit
+        ``"utf-8"`` for strict, BOM-preserving decoding.
     dialect
-        A :mod:`csv` dialect name. Defaults to ``"excel"`` (comma-
-        separated, double-quote escaping).
+        A :mod:`csv` dialect name. Defaults to ``"excel"`` (double-quote
+        escaping). It supplies the quoting rules; the field delimiter is
+        chosen by ``delimiter`` (sniffed by default) and overrides the
+        dialect's own.
+    delimiter
+        Field delimiter. ``None`` (default) sniffs it from the file's
+        first populated line among comma, semicolon, tab, and pipe — so a
+        semicolon-delimited export (Excel's European-locale default)
+        loads as columns instead of one fat string. A file with no
+        delimiter at all falls back to comma. Pass an explicit character
+        (``","``, ``";"``, a tab, …) to force one and skip sniffing.
     workbook
         If given, add the new sheet to this workbook and return it.
         Otherwise a fresh :class:`Workbook` is created.
@@ -147,7 +211,14 @@ def read_csv(
 
     p = Path(path)
     with p.open("r", encoding=encoding, newline="") as f:
-        reader = _csv.reader(f, dialect=dialect)
+        if delimiter is None:
+            # Peek at a bounded sample to choose the delimiter, then
+            # rewind. utf-8-sig has already eaten any BOM, so the sample
+            # the sniffer sees is clean.
+            sample = f.read(_SNIFF_SAMPLE_CHARS)
+            f.seek(0)
+            delimiter = _sniff_delimiter(sample)
+        reader = _csv.reader(f, dialect=dialect, delimiter=delimiter)
         # One batch for the whole load: a single sheet:batch event instead
         # of one cell:change per cell, and any formulas in the target
         # workbook that reference the loaded region recompute once on exit.
