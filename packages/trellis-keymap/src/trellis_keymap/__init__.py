@@ -5,7 +5,7 @@ the focused grid sees and answers with an :class:`Action` from a closed
 vocabulary, which the app's shared executor then performs. There is one
 key path and every keymap goes through it — the default Excel bindings
 live in the built-in :class:`ExcelKeymap`, and an alternative language
-(vim, in ``trellis-tui-vim``) is just another :class:`Keymap` registered
+(vim, in ``trellis-vim``) is just another :class:`Keymap` registered
 under the ``trellis_keymap.keymaps`` entry point and selected with
 ``--keymap NAME`` (``--vim`` is sugar). No fall-through between keymaps:
 the active keymap is the sole authority for the keys it sees (DECIDED
@@ -45,6 +45,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib.metadata import entry_points
 from typing import Any, Callable, Protocol, runtime_checkable
+
+# Distribution version (mirrors pyproject); exposed like ``trellis`` and
+# ``trellis_undo`` so a frontend can introspect the keymap-contract version.
+__version__ = "0.1.0"
 
 __all__ = [
     "Action",

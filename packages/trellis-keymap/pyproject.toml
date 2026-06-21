@@ -23,7 +23,7 @@ classifiers = [
 # Zero dependencies — the contract is stdlib-only (dataclasses, typing,
 # importlib.metadata), exactly like the core engine. A FRONTEND (the TUI, a
 # future GUI) imports this to host key languages; a KEYMAP package
-# (trellis-tui-vim) imports only this to BE one. Neither needs the other's
+# (trellis-vim) imports only this to BE one. Neither needs the other's
 # framework. Keymaps register under the "trellis_keymap.keymaps" entry point.
 dependencies = []
 

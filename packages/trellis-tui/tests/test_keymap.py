@@ -164,7 +164,7 @@ def test_build_app_keymap_flags(capsys):
 
 
 def test_build_app_unknown_keymap_errors(capsys):
-    assert build_app(["--vim"]) is None  # trellis-tui-vim not installed here
+    assert build_app(["--vim"]) is None  # trellis-vim not installed here
     out = capsys.readouterr().out
     assert "unknown keymap 'vim'" in out and "excel" in out
     assert build_app(["--keymap"]) is None  # missing value

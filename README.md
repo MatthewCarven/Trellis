@@ -11,7 +11,7 @@ The project's design philosophy is *open extensibility*. The core is small. Almo
 
 ## Status
 
-Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, the **frontend-neutral keymap contract** ([trellis-keymap](packages/trellis-keymap), zero-dependency, hosts swappable key languages for any frontend), three reference extensions — [trellis-mathpack](packages/trellis-mathpack) (global registration via entry point), [trellis-undo](packages/trellis-undo) (stateful attachment via events + meta), and [trellis-tui-vim](packages/trellis-tui-vim) (a whole key language built on `trellis-keymap`) — and the terminal app ([trellis-tui](packages/trellis-tui), v1 + selection/clipboard/undo/fill/tabs/keymaps). Each reference package exists to prove one extension style real.
+Pre-alpha. Public API is unstable until 0.1. The monorepo ships the engine, the **frontend-neutral keymap contract** ([trellis-keymap](packages/trellis-keymap), zero-dependency, hosts swappable key languages for any frontend), three reference extensions — [trellis-mathpack](packages/trellis-mathpack) (global registration via entry point), [trellis-undo](packages/trellis-undo) (stateful attachment via events + meta), and [trellis-vim](packages/trellis-vim) (a whole key language built on `trellis-keymap`) — and the terminal app ([trellis-tui](packages/trellis-tui), v1 + selection/clipboard/undo/fill/tabs/keymaps). Each reference package exists to prove one extension style real.
 
 ## Quick taste (library)
 

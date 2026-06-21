@@ -13,7 +13,7 @@ nothing but the standard library (`dataclasses`, `typing`,
 
 - a **frontend** (the `trellis-tui` terminal UI today; a future GUI) imports it
   to *host* key languages, and
-- a **keymap package** (`trellis-tui-vim`) imports only it to *be* one,
+- a **keymap package** (`trellis-vim`) imports only it to *be* one,
 
 without either pulling in the other's UI framework. The same Excel/vim keymaps
 drive any frontend.
@@ -44,4 +44,4 @@ drive any frontend.
    any queued `Move` lands.
 
 See `docs/keymap-plugin.md` in the monorepo for the full contract doc and a
-toy keymap, and `trellis-tui-vim` for the reference implementation.
+toy keymap, and `trellis-vim` for the reference implementation.

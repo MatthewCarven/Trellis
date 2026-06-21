@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Recreate the Trellis dev venv — Linux / macOS.
 #   Usage:  bash scripts/setup-venv.sh
-# Installs: core + trellis-mathpack + trellis-undo + trellis-tui + trellis-tui-vim (all editable) + pytest, then runs the suite.
+# Installs: core + trellis-mathpack + trellis-undo + trellis-tui + trellis-vim (all editable) + pytest, then runs the suite.
 #
 # Notes:
 #  - VENV_DIR overrides the venv location (default: .venv at repo root).
@@ -25,7 +25,7 @@ python3 -m venv "$VENV_DIR"
 VENV_PY="$VENV_DIR/bin/python"
 "$VENV_PY" -m pip install --upgrade pip --quiet
 # shellcheck disable=SC2086
-"$VENV_PY" -m pip install $PIP_FLAGS -e "$ROOT" -e "$ROOT/packages/trellis-mathpack" -e "$ROOT/packages/trellis-undo" -e "$ROOT/packages/trellis-tui" -e "$ROOT/packages/trellis-tui-vim" pytest pytest-asyncio
+"$VENV_PY" -m pip install $PIP_FLAGS -e "$ROOT" -e "$ROOT/packages/trellis-mathpack" -e "$ROOT/packages/trellis-undo" -e "$ROOT/packages/trellis-tui" -e "$ROOT/packages/trellis-vim" pytest pytest-asyncio
 
 echo
 echo "Verifying: running the core suite (+doctests) ..."

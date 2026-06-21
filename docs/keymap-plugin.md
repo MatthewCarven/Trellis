@@ -3,7 +3,7 @@
 The terminal app's first extension point is the **keymap**: a whole key
 language for the grid. The built-in Excel bindings are themselves one
 (`ExcelKeymap`), and the reference plugin
-([trellis-tui-vim](../packages/trellis-tui-vim)) is a full vim language —
+([trellis-vim](../packages/trellis-vim)) is a full vim language —
 modes, counts, operators, the `:` command line — in ~470 lines that
 import only the contract. This doc is the contract, for the next author.
 
@@ -149,7 +149,7 @@ Pilot. Copy that ratio.
 
 ## What the reference proves
 
-`trellis-tui-vim` exercises every corner: modes via `EnterMode`, counts
+`trellis-vim` exercises every corner: modes via `EnterMode`, counts
 and doubled operators as parse state, motions computed from
 `ctx.cell`/`used_range`, Visual ops over execution-time rects, `Chain`
 for `:wq`, the `:` line built entirely from `EnterMode("command")` +

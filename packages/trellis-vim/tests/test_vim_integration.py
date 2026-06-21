@@ -10,7 +10,7 @@ from trellis import Workbook
 from trellis_tui import TrellisApp
 from trellis_tui.app import StatusBar
 from trellis_tui.editor import CellEditor
-from trellis_tui_vim import VimKeymap
+from trellis_vim import VimKeymap
 
 
 def make_app(cells=None) -> TrellisApp:

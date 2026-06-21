@@ -27,7 +27,7 @@ from trellis_keymap import (
     Undo,
     available_keymaps,
 )
-from trellis_tui_vim import VimKeymap
+from trellis_vim import VimKeymap
 
 kp = KeyPress.parse
 

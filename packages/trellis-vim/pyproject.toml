@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "trellis-tui-vim"
+name = "trellis-vim"
 version = "0.1.0"
-description = "Vim keymap for the Trellis terminal spreadsheet — the reference keymap plugin."
+description = "Vim keymap for Trellis frontends (terminal or GUI) — the reference keymap plugin."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Matthew Carven", email = "matthewcarven@gmail.com" }]
-keywords = ["trellis", "spreadsheet", "tui", "vim", "keymap"]
+keywords = ["trellis", "spreadsheet", "vim", "keymap"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Office/Business :: Financial :: Spreadsheet",
 ]
-# A KEYMAP PLUGIN for the TUI (not an engine plugin — there is no
+# A KEYMAP PLUGIN for a Trellis frontend (not an engine plugin — there is no
 # trellis.plugins entry point here, and the engine never learns this
 # package exists). It implements the textual-free contract in
 # trellis_keymap and registers below; `trellis --vim` selects it.
@@ -30,14 +30,14 @@ dependencies = ["trellis-keymap"]
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-asyncio>=0.23"]
 
-# The hook this package exists to prove (design.md Part 10): the TUI
+# The hook this package exists to prove (design.md Part 10): a frontend
 # discovers keymaps by name in this group — mathpack's pattern, one
 # layer out. The factory is the class itself.
 [project.entry-points."trellis_keymap.keymaps"]
-vim = "trellis_tui_vim:VimKeymap"
+vim = "trellis_vim:VimKeymap"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/trellis_tui_vim"]
+packages = ["src/trellis_vim"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

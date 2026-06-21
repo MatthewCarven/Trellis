@@ -4,6 +4,46 @@ A session-by-session record of what was built, decided, and discovered. Newest e
 
 ---
 
+## 2026-06-21 — Session 42 (build, cont.): rename trellis-tui-vim → trellis-vim; trellis_keymap gets __version__
+
+Prompted by the GUI: while checking `trellis-gui` against the engine I found the vim keymap package
+`trellis-tui-vim` is misnamed — it depends only on `trellis-keymap` (no `trellis-tui`, no Textual), so
+it has been frontend-neutral since the S40 keymap extraction. With the GUI about to consume it, the
+"tui" actively lies. Renamed it across the monorepo.
+
+**Rename (dist + module).** `trellis-tui-vim` → `trellis-vim`; module `trellis_tui_vim` → `trellis_vim`.
+Touched: the package dir + `src/` module dir (filesystem `mv`, so git records a rename on commit); its
+`pyproject` (`name`, the `vim = "trellis_vim:VimKeymap"` entry point, the wheel `packages` path, plus
+frontend-neutral description/keywords/comments); its `__init__` docstring; both its test modules; the
+TUI's `test_keymap.py`; `scripts/setup-venv.{ps1,sh}`; and every doc reference (main + TUI + keymap
+READMEs, `docs/keymap-plugin.md`, `design.md`, `CLAUDE.md`). The entry-point GROUP
+(`trellis_keymap.keymaps`) is unchanged, so discovery is untouched in shape. **34 token replacements**
+across 16 files. WORKLOG history left as-is (it records the old name as it was then); this entry is the
+rename's record.
+
+**__version__ for trellis_keymap.** Added `__version__ = "0.1.0"` (matching its pyproject) to
+`trellis_keymap/__init__.py`, aligning it with `trellis` (0.0.1) and `trellis_undo` (0.1.0), which both
+already expose it. Closes the one cosmetic inconsistency surfaced in the GUI consistency check.
+
+**Verified.** Imports resolve (`trellis_vim.VimKeymap`, `trellis_keymap.__version__ == "0.1.0"`);
+hermetic suites green under the new name — vim 35 / keymap 19 / TUI test_keymap 21. Crucially, real
+entry-point **discovery** proven off-mount: a fresh venv editable-installing `trellis-keymap` +
+`trellis-vim` gives `available_keymaps() == ['excel','vim']` and `load_keymap('vim') -> VimKeymap` from
+the renamed module — the rename didn't break the hook.
+
+**Heads-up for the next venv:** any existing `.venv` still has the old `trellis-tui-vim` dist-info;
+re-run `scripts/setup-venv` so the new entry point registers (same stale-venv gotcha as S38/S39).
+
+**Related (separate `trellis-gui` repo):** added the missing `Fill` handler to `grid_model.apply_action`
+(Ctrl+D/Ctrl+R were silently dropped) + 5 tests, and recorded the swappable-keymap/vim-in-GUI roadmap —
+those land in the GUI repo, not here.
+
+**Uncommitted (main repo)** — the rename (dir move + 16 edited files) + `trellis_keymap` `__version__`.
+Awaits Matthew's commit + push. The dir rename shows as delete-old + add-new in `git status` until
+staged; `git add -A` records it as a rename.
+
+---
+
 ## 2026-06-21 — Session 42 (build, cont.): shift_formula made `!`-aware — the cross-sheet × clipboard gap closed
 
 Resolved the follow-up flagged through all of Part 12: `shift_formula` (the copy/paste/fill rewriter)

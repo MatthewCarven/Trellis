@@ -1093,7 +1093,7 @@ part introduces a *keymap* abstraction so a plugin can supply a whole alternativ
 
 The shape is set by decision 6: **there is one key path, and every keymap goes through it —
 including the default.** The current Excel bindings are ported to a built-in `ExcelKeymap`; vim
-ships as the external `trellis-tui-vim` package. So the contract is validated by **two consumers
+ships as the external `trellis-vim` package. So the contract is validated by **two consumers
 from day one** — an extension point with a single consumer is just that consumer's internals
 wearing a coat. Three reference plugins now bracket three extension styles: mathpack (entry-point
 globals), trellis-undo (events + meta), and the keymaps (a frontend strategy hook).
@@ -1110,7 +1110,7 @@ Engine additions: **none** — all in the TUI layer. The core design test doesn'
 3. **Keymap-plugin API now.** Vim is a keymap object behind a real extension point, not a hardcoded mode.
 4. **In vim, `Ctrl+D` = half-page-down, `Ctrl+R` = redo.** The Part 8 fill keys are the *Excel
    keymap's* binding; the vim keymap rebinds them. Fill stays reachable in vim via Visual + `p`.
-5. **Vim ships as a separate `packages/trellis-tui-vim/` package**, registered via an entry point —
+5. **Vim ships as a separate `packages/trellis-vim/` package**, registered via an entry point —
    proving the hook from *outside*, like mathpack.
 6. **One path — Excel is a keymap too.** The default bindings port to a built-in `ExcelKeymap` (the
    default active keymap); every key in every config flows through the one `handle() → Action`
@@ -1234,7 +1234,7 @@ the suite green (Part 9's active-view move).
 |---|------------|-------|
 | 1 | This design pass + the contract — **DONE (S37)** | design.md Part 10 (+ docs/keymap-plugin.md at row 4) |
 | 2 | Keymap layer in trellis-tui: the delegate + Action executor (incl. `Fill`) + `KeyContext` + mode state/`-- MODE --` indicator + entry-point discovery + `--keymap`/`--vim`. **Port the current bindings into the built-in `ExcelKeymap` (default active); 175 tests are the net.** Possibly two sessions if the port is gnarly. — **DONE (S38**, one session: the port came in clean, 175 untouched + 20 contract tests**)** | trellis-tui |
-| 3 | `packages/trellis-tui-vim/`: the vim `Keymap` — modes, motions, operators, command-line — via the entry point. + hermetic tests — **DONE (S38**, same session as row 2: 26 hermetic + 9 Pilot tests; install-level discovery proved in an off-mount venv**)** | new package |
+| 3 | `packages/trellis-vim/`: the vim `Keymap` — modes, motions, operators, command-line — via the entry point. + hermetic tests — **DONE (S38**, same session as row 2: 26 hermetic + 9 Pilot tests; install-level discovery proved in an off-mount venv**)** | new package |
 | 4 | Docs (both READMEs, the contract doc, design rows) + worklog; then **field-verify** (Windows Terminal) — **DONE (S39**, 2026-06-12: docs/keymap-plugin.md written; field check PASSED — see addendum**)** | docs + Matthew |
 
 Rows land green before the next starts — the Part 6/9 rhythm.
@@ -1312,7 +1312,7 @@ Matthew, Windows Terminal, `trellis --vim demo.csv`. All three S35-rule items pa
   type-to-edit leakage.
 One install finding (not a code bug): a venv built before row 3 doesn't see the new package —
 the helpful-failure path (`unknown keymap 'vim' (available: excel)`) fired exactly as designed,
-fixed with `pip install -e packages/trellis-tui-vim`. Noted in docs/keymap-plugin.md.
+fixed with `pip install -e packages/trellis-vim`. Noted in docs/keymap-plugin.md.
 PART 10 COMPLETE.
 
 
@@ -1419,7 +1419,7 @@ except the entry-point group, renamed `trellis_tui.keymaps` → **`trellis_keyma
 so any frontend reads a neutral group, not a `trellis_tui.*` one it doesn't own.
 
 **Consumers repointed.**
-- `trellis-tui-vim` now imports `trellis_keymap` and depends on `trellis-keymap` ALONE (was
+- `trellis-vim` now imports `trellis_keymap` and depends on `trellis-keymap` ALONE (was
   `trellis-tui`). The vim language is now frontend-independent — it can drive a GUI unchanged.
   Its entry point moved to the new group.
 - `trellis-tui` gained a `trellis-keymap` dependency; `trellis_tui/keymap.py` became a 19-line
@@ -1434,7 +1434,7 @@ hermetic (26) + vim Pilot integration (9) + the full TUI suite (196, through the
 `VimKeymap`.
 
 **The monorepo now ships four companion packages**: trellis-keymap (the contract), trellis-mathpack
-(engine plugin), trellis-undo (engine attachment), and trellis-tui (frontend) + trellis-tui-vim
+(engine plugin), trellis-undo (engine attachment), and trellis-tui (frontend) + trellis-vim
 (a keymap on the contract). Three reference extension styles, plus the shared keymap contract the
 second frontend will build on.
 

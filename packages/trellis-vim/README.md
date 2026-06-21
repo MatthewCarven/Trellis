@@ -1,9 +1,9 @@
-# trellis-tui-vim
+# trellis-vim
 
 A vim keymap for the [Trellis](../../README.md) terminal spreadsheet — and the **reference keymap plugin**: it proves the [trellis-keymap](../trellis-keymap) contract from outside — hostable by any frontend, not just the TUI — the way [trellis-mathpack](../trellis-mathpack) proves the engine's entry point. The three reference packages bracket the three extension styles: entry-point globals (mathpack), events + meta (trellis-undo), and a frontend strategy hook (this).
 
 ```
-pip install -e packages/trellis-tui-vim
+pip install -e packages/trellis-vim
 trellis --vim data.csv        # or --keymap vim
 ```
 
@@ -43,6 +43,6 @@ The mode rides the TUI status bar (`-- VISUAL --`, `-- INSERT --`, `-- COMMAND -
 Hermetic parser tests need no textual; the integration tests drive the real app headless (Pilot):
 
 ```
-cd packages/trellis-tui-vim
+cd packages/trellis-vim
 PYTHONPATH=src:../trellis-tui/src:../../src:../trellis-undo/src python -m pytest
 ```

@@ -1,6 +1,6 @@
 # Recreate the Trellis dev venv (.venv at repo root) — Windows / PowerShell.
 #   Usage:  powershell -ExecutionPolicy Bypass -File scripts\setup-venv.ps1
-# Installs: core + trellis-mathpack + trellis-undo + trellis-tui + trellis-tui-vim (all editable) + pytest, then runs the suite.
+# Installs: core + trellis-mathpack + trellis-undo + trellis-tui + trellis-vim (all editable) + pytest, then runs the suite.
 # After it finishes:  .venv\Scripts\Activate.ps1  then  trellis [file.csv]
 # Requires Python 3.11+ (the declared baseline in pyproject.toml).
 
@@ -22,7 +22,7 @@ try {
 
     $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
     & $VenvPy -m pip install --upgrade pip --quiet
-    & $VenvPy -m pip install -e . -e .\packages\trellis-mathpack -e .\packages\trellis-undo -e .\packages\trellis-tui -e .\packages\trellis-tui-vim pytest pytest-asyncio
+    & $VenvPy -m pip install -e . -e .\packages\trellis-mathpack -e .\packages\trellis-undo -e .\packages\trellis-tui -e .\packages\trellis-vim pytest pytest-asyncio
 
     Write-Host ""
     Write-Host "Verifying: running the core suite (+doctests) ..."

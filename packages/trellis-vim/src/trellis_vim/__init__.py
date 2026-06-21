@@ -1,4 +1,4 @@
-"""trellis-tui-vim — the vim keymap for the Trellis TUI (design.md Part 10).
+"""trellis-vim — the vim keymap for Trellis frontends, terminal or GUI (design.md Part 10).
 
 The reference *keymap plugin*: a whole alternative key language behind
 the TUI's keymap hook, registered under the ``trellis_keymap.keymaps``
